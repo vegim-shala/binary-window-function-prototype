@@ -1,0 +1,7 @@
+region,temp_avg,temperature,timestamp
+south,22.5,20,1
+south,25,25,2
+south,27.5,30,3
+north,15,10,1
+north,15,20,2
+north,17.5,15,3

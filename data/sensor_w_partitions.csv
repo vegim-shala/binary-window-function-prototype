@@ -1,0 +1,7 @@
+region,timestamp,temperature
+north,3,15.0
+south,2,25.0
+north,1,10.0
+south,3,30.0
+north,2,20.0
+south,1,20.0

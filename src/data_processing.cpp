@@ -97,16 +97,16 @@ std::pair<Dataset, FileSchema>  compute_moving_avg(
 
 
 int main() {
-   // auto [data, schema] = read_csv("sensor.csv");
-    verify_binary_file("dynamic_columns.bin");
-    auto [data, schema] = read_binary("sensor.bin");
+   auto [data, schema] = read_csv("sensor_w_partitions.csv");
+    // verify_binary_file("dynamic_columns.bin");
+    // auto [data, schema] = read_binary("sensor.bin");
 
     print_dataset(data, schema, 100);
     BinaryWindowSpec spec;
-    spec.partition_column = ""; // Optional
-    spec.order_column = "time";
-    spec.value_column = "temp";
-    spec.output_column = "avg_temp_window";
+    spec.partition_column = "region"; // Optional
+    spec.order_column = "timestamp";
+    spec.value_column = "temperature";
+    spec.output_column = "temp_avg";
     spec.agg_type = AggregationType::AVG;
     spec.frame_spec = {FrameType::ROWS, 1, 1};
     BinaryWindowOperator op(spec);
@@ -116,7 +116,7 @@ int main() {
     print_dataset(result, new_schema, 100);
     // if (result) {
     //     // Success - use *result
-    write_csv("dynamic_columns_output.csv", result);
+    write_csv("sensor_w_partitions_output.csv", result);
     // } else {
     //     // Handle error
     // }

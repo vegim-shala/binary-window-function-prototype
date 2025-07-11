@@ -7,7 +7,8 @@ set(CMAKE_CXX_STANDARD 20)
 include_directories(include)
 
 file(GLOB AGGREGATOR_CPPS "src/aggregators/*.cpp"
-        "src/operators/**.cpp")
+        "src/operators/*.cpp"
+        "src/operators/utils/*.cpp")
 
 set(COMMON_SOURCES src/data_io.cpp
         ${AGGREGATOR_CPPS})
