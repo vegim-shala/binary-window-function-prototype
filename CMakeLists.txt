@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 # Add this line to specify include directories
 include_directories(include)
 
-file(GLOB AGGREGATOR_CPPS "src/aggregators/*.cpp"
+file(GLOB AGGREGATOR_CPPS "src/aggregators/**.cpp"
         "src/operators/*.cpp"
         "src/operators/utils/*.cpp")
 
@@ -16,4 +16,6 @@ set(COMMON_SOURCES src/data_io.cpp
 add_executable(unary_prototype_csv src/data_processing.cpp
         ${COMMON_SOURCES})
 add_executable(binary_creator src/binary_creator.cpp
+        ${COMMON_SOURCES})
+add_executable(binary_prototype_csv src/binary_data_processing.cpp
         ${COMMON_SOURCES})

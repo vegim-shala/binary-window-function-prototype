@@ -5,7 +5,7 @@
 #include <iostream>
 #include "data_processing.h"
 #include <numeric>
-#include <operators/binary_window_operator.h>
+#include <operators/window_function_operator.h>
 #include <cmath>
 
 using namespace std;
@@ -94,22 +94,20 @@ std::pair<Dataset, FileSchema>  compute_moving_avg(
 }
 
 
-
-
 int main() {
    auto [data, schema] = read_csv("sensor_w_partitions.csv");
     // verify_binary_file("dynamic_columns.bin");
     // auto [data, schema] = read_binary("sensor.bin");
 
     print_dataset(data, schema, 100);
-    BinaryWindowSpec spec;
+    WindowFunctionModel spec;
     spec.partition_column = "region"; // Optional
     spec.order_column = "timestamp";
     spec.value_column = "temperature";
     spec.output_column = "temp_avg";
     spec.agg_type = AggregationType::AVG;
     spec.frame_spec = {FrameType::ROWS, 1, 1};
-    BinaryWindowOperator op(spec);
+    WindowFunctionOperator op(spec);
 
     auto [result, new_schema] = op.execute(data, schema);
     // auto [result, resultSchema] = compute_moving_avg(data, "age", "window_avg", 2, schema);

@@ -1,7 +1,7 @@
 //
 // Created by Vegim Shala on 10.7.25.
 //
-#include "operators/binary_window_operator.h"
+#include "operators/window_function_operator.h"
 #include "operators/utils/frame_utils.h"
 #include "operators/utils/partition_utils.h"
 #include "operators/utils/sort_utils.h"
@@ -9,7 +9,7 @@
 
 using namespace std;
 
-pair<Dataset, FileSchema> BinaryWindowOperator::execute(const Dataset& input, FileSchema schema) {
+pair<Dataset, FileSchema> WindowFunctionOperator::execute(const Dataset& input, FileSchema schema) {
     Dataset result;
     FrameUtils frame_utils(spec.frame_spec, spec.order_column);
 

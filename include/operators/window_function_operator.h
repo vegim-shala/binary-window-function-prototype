@@ -8,7 +8,7 @@
 #include "operators/utils/frame_utils.h"
 #include "data_io.h"
 
-struct BinaryWindowSpec {
+struct WindowFunctionModel {
     std::string value_column;
     std::string partition_column; // optional
     std::string order_column;
@@ -19,9 +19,9 @@ struct BinaryWindowSpec {
     AggregationType agg_type;
 };
 
-class BinaryWindowOperator {
+class WindowFunctionOperator {
 public:
-    explicit BinaryWindowOperator(BinaryWindowSpec spec)
+    explicit WindowFunctionOperator(WindowFunctionModel spec)
         : spec(std::move(spec)),
           aggregator(create_aggregator(this->spec.agg_type)) {
     }
@@ -29,7 +29,7 @@ public:
     std::pair<Dataset, FileSchema> execute(const Dataset &input, FileSchema schema);
 
 private:
-    BinaryWindowSpec spec;
+    WindowFunctionModel spec;
     std::unique_ptr<Aggregator> aggregator;
 
     // double apply_function(const std::vector<double> &values) const;

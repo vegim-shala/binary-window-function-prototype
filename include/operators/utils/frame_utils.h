@@ -3,6 +3,8 @@
 //
 
 #pragma once
+#include <map>
+
 #include "data_io.h"
 
 enum class FrameType { RANGE, ROWS };
@@ -21,6 +23,8 @@ public:
     std::vector<size_t> compute_range_indices(
         const Dataset &input,
         size_t current_index) const;
+
+    std::vector<size_t> compute_range_frame_binary(const Dataset &input, const DataRow &probe_row) const;
 
     std::vector<size_t> compute_row_frame(
         const Dataset &input,

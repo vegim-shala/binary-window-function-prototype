@@ -42,3 +42,18 @@ std::vector<size_t> FrameUtils::compute_range_indices(const Dataset& input, size
       throw std::runtime_error("Unsupported frame type");
       }
 }
+
+std::vector<size_t> FrameUtils::compute_range_frame_binary(const Dataset& input, const DataRow& probe_row) const {
+    std::vector<size_t> indices;
+    double center_time = extract_numeric(probe_row.at(order_column));
+    double start_range = center_time - frame_spec.preceding;
+    double end_range = center_time + frame_spec.following;
+
+    for (size_t j = 0; j < input.size(); ++j) {
+        double time = extract_numeric(input[j].at(order_column));
+        if (time >= start_range && time <= end_range) {
+            indices.push_back(j);
+        }
+    }
+    return indices;
+}
