@@ -22,12 +22,15 @@ void print_raw_data(const std::vector<Row>& data) {
 
 int main() {
     auto start = std::chrono::high_resolution_clock::now();
-   auto [input, input_schema] = read_csv("UC1_input.csv");
-   auto [probe, probe_schema] = read_csv("UC1_input.csv");
+
+    auto [input, input_schema] = read_csv("UC1_input.csv");
+    auto [probe, probe_schema] = read_csv("UC1_input.csv");
     // verify_binary_file("dynamic_columns.bin");
     // auto [data, schema] = read_binary("sensor.bin");
 
+    cout << "Input: " << endl;
     print_dataset(input, input_schema, 100);
+    cout << "Probe: " << endl;
     print_dataset(probe, probe_schema, 100);
 
     BinaryWindowFunctionModel model;
@@ -36,31 +39,24 @@ int main() {
     model.order_column = "timestamp";
     model.output_column = "sum_result";
     model.frame_spec = FrameSpec{
-        .type = FrameType::RANGE,
-        .preceding = 2,  // Time range
+        .type = FrameType::ROWS,
+        .preceding = 1,  // Time range
         .following = 0
     };
     model.agg_type = AggregationType::SUM;
 
     BinaryWindowFunctionOperator op(model);
 
-    auto [result, new_schema] = op.execute(input, probe, input_schema);
+    auto [result, new_schema] = op.execute(input, probe, probe_schema);
 
+    print_dataset(result, new_schema, 100);
 
+    cout << "Output: " << endl;
     write_csv("UC1_result.csv", result);
-
 
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     std::cout << "Execution Time: " << duration.count() << " ms\n";
-    // auto [result, resultSchema] = compute_moving_avg(data, "age", "window_avg", 2, schema);
-    // print_dataset(result, new_schema, 100);
-    // if (result) {
-    //     // Success - use *result
 
-
-    // } else {
-    //     // Handle error
-    // }
     return 0;
 }

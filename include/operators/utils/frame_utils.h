@@ -4,6 +4,8 @@
 
 #pragma once
 #include <map>
+#include <map>
+#include <map>
 
 #include "data_io.h"
 
@@ -25,6 +27,10 @@ public:
         size_t current_index) const;
 
     std::vector<size_t> compute_range_frame_binary(const Dataset &input, const DataRow &probe_row) const;
+
+    std::vector<size_t> compute_row_frame_binary(const Dataset &input, const DataRow &probe_row) const;
+
+    std::vector<size_t> compute_binary_frame_indices(const Dataset &input, const DataRow &probe_row) const;
 
     std::vector<size_t> compute_row_frame(
         const Dataset &input,

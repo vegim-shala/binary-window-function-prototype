@@ -27,7 +27,7 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(const Dataset& i
         SortUtils::sort_dataset(input_partition, spec.order_column);
 
         for (const auto& probe_row : probe_partition) {
-            std::vector<size_t> indices = frame_utils.compute_range_frame_binary(input_partition, probe_row);
+            std::vector<size_t> indices = frame_utils.compute_binary_frame_indices(input_partition, probe_row);
             std::vector<double> values;
 
             for (size_t idx : indices) {
