@@ -8,23 +8,27 @@
 using namespace std;
 
 std::string BinaryWindowFunctionOperator::extract_partition_key(const DataRow& row) const {
-    if (spec.partition_column.empty()) return "__NOPART__";
-    return std::get<std::string>(row.at(spec.partition_column));
+    if (spec.partition_columns.empty()) return "__NOPART__";
+    std::string key;
+    for (const auto& col : spec.partition_columns) {
+        key += std::get<std::string>(row.at(col)) + "|";
+    }
+    return key;
 }
 
 pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(const Dataset& input, const Dataset& probe, FileSchema schema) {
     Dataset result;
 
     // Partition input and probe
-    auto input_partitions = PartitionUtils::partition_dataset(input, spec.partition_column);
-    auto probe_partitions = PartitionUtils::partition_dataset(probe, spec.partition_column);
+    auto input_partitions = PartitionUtils::partition_dataset(input, spec.partition_columns);
+    auto probe_partitions = PartitionUtils::partition_dataset(probe, spec.partition_columns);
 
     for (const auto& [partition_key, probe_partition] : probe_partitions) {
         auto input_it = input_partitions.find(partition_key);
         if (input_it == input_partitions.end()) continue;
 
         Dataset& input_partition = input_it->second;
-        SortUtils::sort_dataset(input_partition, spec.order_column);
+        SortUtils::sort_dataset(input_partition, spec.order_column); // sometimes it might not be needed
 
         for (const auto& probe_row : probe_partition) {
             std::vector<size_t> indices = frame_utils.compute_binary_frame_indices(input_partition, probe_row);

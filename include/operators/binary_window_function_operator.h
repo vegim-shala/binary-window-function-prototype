@@ -7,7 +7,7 @@
 
 struct BinaryWindowFunctionModel {
     std::string value_column;
-    std::string partition_column; // optional
+    std::vector<std::string> partition_columns; // optional
     std::string order_column;
     std::string output_column;
 

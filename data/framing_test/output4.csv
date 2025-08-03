@@ -1,0 +1,6 @@
+category,id,subcategory,sum_result,timestamp,value
+A,4,B,40,4,40
+A,5,B,90,5,50
+A,1,A,10,1,10
+A,2,A,30,2,20
+A,3,A,50,3,30

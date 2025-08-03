@@ -16,7 +16,7 @@ pair<Dataset, FileSchema> WindowFunctionOperator::execute(const Dataset& input, 
     // Let's first handle the partitioning and sorting
     std::vector<Dataset> partitions;
 
-    auto partitioned = PartitionUtils::partition_dataset(input, spec.partition_column);
+    auto partitioned = PartitionUtils::partition_dataset(input, spec.partition_columns);
     for (auto& [_, partition] : partitioned) {
         SortUtils::sort_dataset(partition, spec.order_column);
         partitions.push_back(std::move(partition));

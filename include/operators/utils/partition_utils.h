@@ -10,6 +10,6 @@ namespace PartitionUtils {
     using PartitionKey = std::string;
 
     std::unordered_map<PartitionKey, Dataset>
-    partition_dataset(const Dataset& input, const std::string& partition_column);
+    partition_dataset(const Dataset& input, const std::vector<std::string>& partition_columns);
 
 }

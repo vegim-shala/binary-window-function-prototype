@@ -10,7 +10,7 @@
 
 struct WindowFunctionModel {
     std::string value_column;
-    std::string partition_column; // optional
+    std::vector<std::string> partition_columns;  // optional
     std::string order_column;
     std::string target_column; // the column we aggregate on
     std::string output_column;

@@ -6,19 +6,20 @@
 
 std::unordered_map<std::string, Dataset> PartitionUtils::partition_dataset(
     const Dataset& dataset,
-    const std::string& partition_column
+    const std::vector<std::string>& partition_columns
 ) {
     std::unordered_map<std::string, Dataset> partitions;
 
-    if (partition_column.empty()) {
+    if (partition_columns.empty()) {
         partitions.insert({"__FULL_DATASET__", dataset});
         return partitions;
     }
 
     for (const auto& row : dataset) {
-        const auto& key = std::get<std::string>(row.at(partition_column));
-
-
+        std::string key;
+        for (const auto& col : partition_columns) {
+            key += std::get<std::string>(row.at(col)) + "|";
+        }
         partitions[key].push_back(row);
     }
 
