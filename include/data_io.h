@@ -21,10 +21,10 @@ struct FileSchema {
     std::map<std::string, std::string> column_types; // "int", "double", "string"  -- ALTHOUGH WE CAN ASSUME INT32 for everyone
 };
 
-struct Row {
-    int id;
-    double value;
-};
+// struct Row {
+//     int id;
+//     double value;
+// };
 
 void print_dataset(const Dataset& data, const FileSchema& schema, size_t max_rows = 10);
 double extract_numeric(const ColumnValue& value);

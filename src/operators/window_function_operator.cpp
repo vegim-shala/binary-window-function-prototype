@@ -11,14 +11,14 @@ using namespace std;
 
 pair<Dataset, FileSchema> WindowFunctionOperator::execute(const Dataset& input, FileSchema schema) {
     Dataset result;
-    FrameUtils frame_utils(spec.frame_spec, spec.order_column);
+    FrameUtils frame_utils(spec.frame_spec, spec.order_columns);
 
     // Let's first handle the partitioning and sorting
     std::vector<Dataset> partitions;
 
     auto partitioned = PartitionUtils::partition_dataset(input, spec.partition_columns);
     for (auto& [_, partition] : partitioned) {
-        SortUtils::sort_dataset(partition, spec.order_column);
+        SortUtils::sort_dataset(partition, spec.order_columns);
         partitions.push_back(std::move(partition));
     }
 

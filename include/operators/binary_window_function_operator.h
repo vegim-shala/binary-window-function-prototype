@@ -2,16 +2,16 @@
 
 #include <string>
 #include "aggregators/factory.h"
-#include "operators/utils/frame_utils.h"
+#include "operators/utils/join_utils.h"
 #include "data_io.h"
 
 struct BinaryWindowFunctionModel {
     std::string value_column;
     std::vector<std::string> partition_columns; // optional
-    std::string order_column;
+    std::vector<std::string> order_columns;
     std::string output_column;
 
-    FrameSpec frame_spec;
+    JoinSpec join_spec;
     AggregationType agg_type;
 };
 
@@ -20,7 +20,7 @@ public:
     explicit BinaryWindowFunctionOperator(BinaryWindowFunctionModel spec)
         : spec(std::move(spec)),
           aggregator(create_aggregator(this->spec.agg_type)),
-          frame_utils(this->spec.frame_spec, this->spec.order_column) {
+          join_utils(this->spec.join_spec, this->spec.order_columns) {
     }
 
     std::pair<Dataset, FileSchema> execute(const Dataset& input, const Dataset& probe, FileSchema schema);
@@ -28,7 +28,7 @@ public:
 private:
     BinaryWindowFunctionModel spec;
     std::unique_ptr<Aggregator> aggregator;
-    FrameUtils frame_utils;
+    JoinUtils join_utils;
 
     std::string extract_partition_key(const DataRow& row) const;
 };

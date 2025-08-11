@@ -22,8 +22,8 @@ struct FrameSpec {
 
 class FrameUtils {
 public:
-    explicit FrameUtils(const FrameSpec &frame_spec, const std::string &order_column)
-          : frame_spec(frame_spec), order_column(order_column) {}
+    explicit FrameUtils(const FrameSpec &frame_spec, const std::vector<std::string> &order_columns)
+          : frame_spec(frame_spec), order_columns(order_columns) {}
 
     std::vector<size_t> compute_range_indices(
         const Dataset &input,
@@ -38,8 +38,7 @@ public:
 
     std::vector<size_t> compute_range_frame_dynamic_binary(
         const Dataset& input, const DataRow& probe_row,
-        const std::string& begin_col, const std::string& end_col,
-        const std::string& order_column) const;
+        const std::string& begin_col, const std::string& end_col) const;
 
     std::vector<size_t> compute_binary_frame_indices(const Dataset& input, const DataRow& probe_row) const;
 
@@ -51,7 +50,9 @@ public:
         const Dataset &input,
         size_t current_index) const;
 
+    void validate() const;
+
 private:
     FrameSpec frame_spec;
-    std::string order_column;
+    const std::vector<std::string> order_columns;
 };

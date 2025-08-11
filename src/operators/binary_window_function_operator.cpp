@@ -2,6 +2,9 @@
 // Created by Vegim Shala on 14.7.25.
 //
 #include "operators/binary_window_function_operator.h"
+
+#include <iostream>
+
 #include "operators/utils/partition_utils.h"
 #include "operators/utils/sort_utils.h"
 
@@ -28,10 +31,13 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(const Dataset& i
         if (input_it == input_partitions.end()) continue;
 
         Dataset& input_partition = input_it->second;
-        SortUtils::sort_dataset(input_partition, spec.order_column); // sometimes it might not be needed
+        SortUtils::sort_dataset(input_partition, spec.order_columns); // sometimes it might not be needed
+
+        // std::cout << "PRINTING DATASET AFTER SORT" << std::endl;
+        // print_dataset(input_partition, schema);
 
         for (const auto& probe_row : probe_partition) {
-            std::vector<size_t> indices = frame_utils.compute_binary_frame_indices(input_partition, probe_row);
+            std::vector<size_t> indices = join_utils.compute_join(input_partition, probe_row);
             std::vector<double> values;
 
             for (size_t idx : indices) {
