@@ -9,21 +9,17 @@
 enum class JoinType { RANGE, ROWS };
 
 struct JoinSpec {
-    JoinType type;
+    JoinType type = JoinType::RANGE;
     std::string begin_column;
     std::string end_column;
 };
 
 class JoinUtils {
 public:
-    explicit JoinUtils(const JoinSpec &join_spec, const std::vector<std::string> &order_columns)
-          : join_spec(join_spec), order_columns(order_columns) {}
+    explicit JoinUtils(const JoinSpec &join_spec, const std::string &order_column)
+          : join_spec(join_spec), order_column(order_column) {}
 
     std::vector<size_t> compute_range_join(
-        const Dataset& input, const DataRow& probe_row,
-        const std::string& begin_col, const std::string& end_col) const;
-
-    std::vector<size_t> compute_rows_join(
         const Dataset& input, const DataRow& probe_row,
         const std::string& begin_col, const std::string& end_col) const;
 
@@ -33,5 +29,5 @@ public:
 
 private:
     JoinSpec join_spec;
-    const std::vector<std::string> order_columns;
+    const std::string order_column;
 };

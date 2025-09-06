@@ -31,7 +31,8 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(const Dataset& i
         if (input_it == input_partitions.end()) continue;
 
         Dataset& input_partition = input_it->second;
-        SortUtils::sort_dataset(input_partition, spec.order_columns); // sometimes it might not be needed
+        SortUtils::sort_dataset(input_partition, spec.order_column); // sometimes it might not be needed
+        // SortUtils::counting_sort_rows(input_partition, spec.order_column); // sometimes it might not be needed
 
         // std::cout << "PRINTING DATASET AFTER SORT" << std::endl;
         // print_dataset(input_partition, schema);

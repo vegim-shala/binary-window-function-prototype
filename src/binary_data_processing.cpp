@@ -27,12 +27,11 @@ int main() {
     BinaryWindowFunctionModel model;
     model.value_column = "value";
     model.partition_columns = {"category"};
-    model.order_columns = {"timestamp"};
+    model.order_column = "timestamp";
     model.output_column = "sum_result";
 
     // RANGE frame based on begin_col / end_col in the probe
     model.join_spec = JoinSpec{
-        .type = JoinType::ROWS,
         .begin_column = "begin_col",
         .end_column = "end_col"
     };

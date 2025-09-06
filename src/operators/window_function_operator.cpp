@@ -18,7 +18,7 @@ pair<Dataset, FileSchema> WindowFunctionOperator::execute(const Dataset& input, 
 
     auto partitioned = PartitionUtils::partition_dataset(input, spec.partition_columns);
     for (auto& [_, partition] : partitioned) {
-        SortUtils::sort_dataset(partition, spec.order_columns);
+        // SortUtils::sort_dataset(partition, spec.order_columns);
         partitions.push_back(std::move(partition));
     }
 
@@ -27,7 +27,9 @@ pair<Dataset, FileSchema> WindowFunctionOperator::execute(const Dataset& input, 
         for (size_t i = 0; i < partition.size(); ++i) {
             const auto& current_row = partition[i];
 
-            std::vector<size_t> indices = frame_utils.compute_range_indices(partition, i);
+            // We initialize an empty indices vector temporarily
+            std::vector<size_t> indices;
+            // std::vector<size_t> indices = std::vector<size_t>; // frame_utils.compute_range_indices(partition, i);
 
             std::vector<double> values;
             for (auto idx : indices) {

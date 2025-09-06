@@ -8,7 +8,7 @@
 struct BinaryWindowFunctionModel {
     std::string value_column;
     std::vector<std::string> partition_columns; // optional
-    std::vector<std::string> order_columns;
+    std::string order_column;
     std::string output_column;
 
     JoinSpec join_spec;
@@ -20,7 +20,7 @@ public:
     explicit BinaryWindowFunctionOperator(BinaryWindowFunctionModel spec)
         : spec(std::move(spec)),
           aggregator(create_aggregator(this->spec.agg_type)),
-          join_utils(this->spec.join_spec, this->spec.order_columns) {
+          join_utils(this->spec.join_spec, this->spec.order_column) {
     }
 
     std::pair<Dataset, FileSchema> execute(const Dataset& input, const Dataset& probe, FileSchema schema);
