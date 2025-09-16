@@ -22,9 +22,17 @@ std::string BinaryWindowFunctionOperator::extract_partition_key(const DataRow& r
 pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(const Dataset& input, const Dataset& probe, FileSchema schema) {
     Dataset result;
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     // Partition input and probe
     auto input_partitions = PartitionUtils::partition_dataset(input, spec.partition_columns);
     auto probe_partitions = PartitionUtils::partition_dataset(probe, spec.partition_columns);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    std::cout << "Time taken for PARTITIONING: " << duration.count() << " ms" << std::endl;
+
+
 
     for (const auto& [partition_key, probe_partition] : probe_partitions) {
         auto input_it = input_partitions.find(partition_key);
@@ -37,8 +45,17 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(const Dataset& i
         // std::cout << "PRINTING DATASET AFTER SORT" << std::endl;
         // print_dataset(input_partition, schema);
 
+        auto start = std::chrono::high_resolution_clock::now();
+
         for (const auto& probe_row : probe_partition) {
+            // auto start = std::chrono::high_resolution_clock::now();
+
             std::vector<size_t> indices = join_utils.compute_join(input_partition, probe_row);
+
+            // auto end = std::chrono::high_resolution_clock::now();
+            // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            // std::cout << "Time taken for ONE JOIN: " << duration.count() << " ms" << std::endl;
+
             std::vector<double> values;
 
             for (size_t idx : indices) {
@@ -49,6 +66,12 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(const Dataset& i
             output_row[spec.output_column] = aggregator->compute(values);
             result.push_back(std::move(output_row));
         }
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << "Time taken for JOINING: " << duration.count() << " ms" << std::endl;
+
+
     }
 
     // Schema extension

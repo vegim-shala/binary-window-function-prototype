@@ -3,14 +3,19 @@
 //
 #include "operators/utils/sort_utils.h"
 
+#include <iostream>
+
+#include "ips2ra.hpp"
+#include "ips4o/ips4o.hpp"
+
 // Helper function for Radix Sort
-void counting_sort_by_digit(std::vector<DataRow>& data, std::vector<int>& keys, int exp) {
+void counting_sort_by_digit(std::vector<DataRow> &data, std::vector<int> &keys, int exp) {
     std::vector<DataRow> output_data(data.size());
     std::vector<int> output_keys(keys.size());
     std::vector<int> count(10, 0);
 
     // Count frequencies of digits
-    for (int key : keys) {
+    for (int key: keys) {
         int digit = (key / exp) % 10;
         count[digit]++;
     }
@@ -36,13 +41,13 @@ void counting_sort_by_digit(std::vector<DataRow>& data, std::vector<int>& keys, 
     keys = std::move(output_keys);
 }
 
-void SortUtils::radix_sort_rows(std::vector<DataRow>& data, std::string order_column) {
+void SortUtils::radix_sort_rows(std::vector<DataRow> &data, std::string order_column) {
     if (data.empty()) return;
 
     // 1. Extract keys and find the maximum value
     std::vector<int> keys;
     keys.reserve(data.size());
-    for (const auto& row : data) {
+    for (const auto &row: data) {
         keys.push_back(extract_numeric(row.at(order_column)));
     }
     int max_key = *std::max_element(keys.begin(), keys.end());
@@ -53,11 +58,11 @@ void SortUtils::radix_sort_rows(std::vector<DataRow>& data, std::string order_co
     }
 }
 
-void SortUtils::counting_sort_rows(std::vector<DataRow>& data, std::string order_column) {
+void SortUtils::counting_sort_rows(std::vector<DataRow> &data, std::string order_column) {
     // 1. First, extract all the keys into a vector.
     std::vector<int> keys;
     keys.reserve(data.size());
-    for (const auto& row : data) {
+    for (const auto &row: data) {
         keys.push_back(extract_numeric(row.at(order_column)));
     }
 
@@ -73,7 +78,7 @@ void SortUtils::counting_sort_rows(std::vector<DataRow>& data, std::string order
     std::vector<DataRow> output(data.size()); // Output array
 
     // Step 1: Count frequencies
-    for (int key : keys) {
+    for (int key: keys) {
         count[key - min_key]++;
     }
 
@@ -94,8 +99,73 @@ void SortUtils::counting_sort_rows(std::vector<DataRow>& data, std::string order
     data = std::move(output);
 }
 
-void SortUtils::sort_dataset(Dataset& data, const std::string& order_column) {
-    std::sort(data.begin(), data.end(), [&](const DataRow& a, const DataRow& b) {
-        return extract_numeric(a.at(order_column)) < extract_numeric(b.at(order_column));
-    });
+// ---------------------------    IPS2RA SORT    -------------------------------
+
+/**
+ * For 10 million records -> 150-200 ms
+ * @param data
+ * @param order_column
+ */
+void ips2ra_sort(Dataset &data, const std::string &order_column) {
+    ips2ra::sort(data.begin(), data.end(),
+                           [&](const DataRow &row) {
+                               return static_cast<size_t>(extract_numeric(row.at(order_column)));
+                           });
+};
+
+// ---------------------------    IPS2RA PARALLEL SORT    -------------------------------
+
+/**
+ * For 10 million records -> 30-70 ms for 4 threads
+ * @param data
+ * @param order_column
+ */
+void ips2ra_parallel_sort(Dataset &data, const std::string &order_column) {
+    ips2ra::parallel::sort(data.begin(), data.end(),
+                           [&](const DataRow &row) {
+                               return static_cast<size_t>(extract_numeric(row.at(order_column)));
+                           });
+};
+
+// ---------------------------    IPS4O SORT    -------------------------------
+
+/**
+ * For 10 million records -> 200-250 ms
+ * @param data
+ * @param order_column
+ */
+void ips4o_sort(Dataset &data, const std::string &order_column) {
+    ips4o::sort(data.begin(), data.end(),
+                [&](const DataRow &a, const DataRow &b) {
+                    return extract_numeric(a.at(order_column)) < extract_numeric(b.at(order_column));
+                });
+};
+
+// ---------------------------    IPS4O PARALLEL SORT    -------------------------------
+
+/**
+ * For 10 million records -> 50-70 ms
+ * @param data
+ * @param order_column
+ */
+void ips4o_parallel_sort(Dataset &data, const std::string &order_column) {
+    ips4o::parallel::sort(
+        data.begin(),
+        data.end(),
+        [&](const DataRow &a, const DataRow &b) {
+            return extract_numeric(a.at(order_column)) < extract_numeric(b.at(order_column));
+        }
+    );
+};
+
+
+void SortUtils::sort_dataset(Dataset &data, const std::string &order_column) {
+    auto start = std::chrono::high_resolution_clock::now();
+
+    ips2ra_parallel_sort(data, order_column);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
+
 }

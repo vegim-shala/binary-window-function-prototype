@@ -3,6 +3,8 @@
 #include <algorithm> // Required for std::sort and std::generate
 #include <chrono>    // Required for timing
 #include <cstdlib>   // Required for std::rand
+#include "ips2ra.hpp"
+#include "ips4o/ips4o.hpp"
 
 int compare_ints(const void* a, const void* b) {
     int arg1 = *static_cast<const int*>(a);
@@ -22,7 +24,7 @@ int compare_ints(const void* a, const void* b) {
  * For 10 million records -> 600-700 ms
  * @param data
  */
-void basic_sort(std::vector<int>& data) {
+void basic_sort(std::vector<size_t>& data) {
     std::sort(data.begin(), data.end());
 };
 
@@ -32,8 +34,8 @@ void basic_sort(std::vector<int>& data) {
  * For 10 million records -> 800-900 ms
  * @param data
  */
-void qsort(std::vector<int>& data) {
-    std::qsort(data.data(), data.size(), sizeof(int), compare_ints);
+void qsort(std::vector<size_t>& data) {
+    std::qsort(data.data(), data.size(), sizeof(size_t), compare_ints);
 };
 
 // ---------------------------    STABLE SORT    -------------------------------
@@ -42,15 +44,15 @@ void qsort(std::vector<int>& data) {
  * For 10 million records -> ~ 500-600 ms
  * @param data
  */
-void stable_sort(std::vector<int>& data) {
+void stable_sort(std::vector<size_t>& data) {
     std::stable_sort(data.begin(), data.end());
 };
 
 // ---------------------------    RADIX SORT    -------------------------------
 
 // Helper function for Radix Sort
-void counting_sort_by_digit(std::vector<int>& data, int exp) {
-    std::vector<int> output(data.size());
+void counting_sort_by_digit(std::vector<size_t>& data, int exp) {
+    std::vector<size_t> output(data.size());
     std::vector<int> count(10, 0); // Digits 0-9
 
     // Store count of occurrences in count[]
@@ -80,7 +82,7 @@ void counting_sort_by_digit(std::vector<int>& data, int exp) {
  * For 10 million records -> ~200-300 ms (Often significantly faster than std::sort for integers)
  * @param data
  */
-void radix_sort(std::vector<int>& data) {
+void radix_sort(std::vector<size_t>& data) {
     if (data.empty()) return;
 
     // Find the maximum number to know the number of digits
@@ -100,7 +102,7 @@ void radix_sort(std::vector<int>& data) {
  * WARNING: Will use massive memory and crash if max_val is large (e.g., RAND_MAX)!
  * @param data
  */
-void counting_sort(std::vector<int>& data) {
+void counting_sort(std::vector<size_t>& data) {
     if (data.empty()) return;
 
     int min_val = *std::min_element(data.begin(), data.end());
@@ -119,7 +121,7 @@ void counting_sort(std::vector<int>& data) {
     }
 
     std::vector<int> count(range, 0);
-    std::vector<int> output(data.size());
+    std::vector<size_t> output(data.size());
 
     // Store the count of each number, shifted by min_val
     for (int i : data) {
@@ -142,26 +144,77 @@ void counting_sort(std::vector<int>& data) {
     data = std::move(output);
 }
 
+
+
+// ---------------------------    IPS2RA SORT    -------------------------------
+
+/**
+ * For 10 million records -> 150-200 ms
+ * @param data
+ */
+void ips2ra_sort(std::vector<size_t>& data) {
+    ips2ra::sort(data.begin(), data.end(), [](size_t x) { return x; });
+};
+
+// ---------------------------    IPS2RA PARALLEL SORT    -------------------------------
+
+/**
+ * For 10 million records -> 30-70 ms for 4 threads
+ * @param data
+ */
+void ips2ra_parallel_sort(std::vector<size_t>& data) {
+    ips2ra::parallel::sort(data.begin(), data.end(), [](size_t x) { return x; });
+};
+
+
+// ---------------------------    IPS4O SORT    -------------------------------
+
+/**
+ * For 10 million records -> 200-250 ms
+ * @param data
+ */
+void ips4o_sort(std::vector<size_t>& data) {
+    ips4o::sort(data.begin(), data.end());
+};
+
+// ---------------------------    IPS4O PARALLEL SORT    -------------------------------
+
+/**
+ * For 10 million records -> 50-70 ms
+ * @param data
+ */
+void ips4o_parallel_sort(std::vector<size_t>& data) {
+    ips4o::parallel::sort(
+        data.begin(),
+        data.end(),
+        std::less<>()
+    );
+};
+
 int main() {
     // Create a vector with 10 million elements (1e7 is 10 million, 1e6 is 1 million) and fill it with random integers
-    const int size = 1e7;
-    std::vector<int> data(size);
+    const int size = 1e5;
+    std::vector<size_t> data(size);
     std::generate(data.begin(), data.end(), std::rand);
 
     // Divide every element by size to reduce the range of values for counting sort
-    for (auto& num : data) {
-        num = num % (size/10); // Reduce range to 0-999 for counting sort
-    }
+    // for (auto& num : data) {
+    //     num = num % (size/10); // Reduce range to 0-999 for counting sort
+    // }
 
     // Time the sorting
     auto start = std::chrono::high_resolution_clock::now();
 
     // Sort the vector
-    // basic_sort(data); // Basic Sort
-    // qsort(data); // QuickSort
-    // stable_sort(data); // QuickSort
-    // radix_sort(data); // QuickSort
-    counting_sort(data); // QuickSort
+    // basic_sort(data);
+    // qsort(data);
+    // stable_sort(data);
+    // radix_sort(data);
+    // counting_sort(data);
+    // ips2ra_sort(data);
+    ips2ra_parallel_sort(data);
+    // ips4o_sort(data);
+    // ips4o_parallel_sort(data);
 
     // Stop the timer
     auto end = std::chrono::high_resolution_clock::now();

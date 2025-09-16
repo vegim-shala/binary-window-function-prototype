@@ -6,3 +6,6 @@ cmake-build-relwithdebinfo/**
 .clang-tidy
 
 data/**
+
+ips2ra/**
+ips4o/**
