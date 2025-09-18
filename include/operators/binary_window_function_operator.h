@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <string>
 #include "aggregators/factory.h"
 #include "operators/utils/join_utils.h"
@@ -31,4 +32,7 @@ private:
     JoinUtils join_utils;
 
     std::string extract_partition_key(const DataRow& row) const;
+
+    Dataset probe_parallel(const Dataset &input_partition, const Dataset &probe_partition, const FileSchema &schema,
+                           size_t num_threads);
 };

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.30)
 project(unary_prototype_csv)
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_BUILD_TYPE Debug)
 
 # Add this line to specify include directories
 include_directories(include)
@@ -40,3 +40,15 @@ target_link_libraries(sorting_tester PRIVATE pthread)
 
 target_compile_options(binary_prototype_csv PRIVATE -pthread)
 target_link_libraries(binary_prototype_csv PRIVATE pthread)
+
+# For macOS with Homebrew-installed libomp
+set(OPENMP_ROOT "/opt/homebrew/opt/libomp")  # Homebrew installation path
+
+find_path(OpenMP_INCLUDE_DIRS omp.h PATHS ${OPENMP_ROOT}/include)
+find_library(OpenMP_CXX_LIBRARIES NAMES omp PATHS ${OPENMP_ROOT}/lib)
+
+if(OpenMP_INCLUDE_DIRS AND OpenMP_CXX_LIBRARIES)
+    target_include_directories(binary_prototype_csv PRIVATE ${OpenMP_INCLUDE_DIRS})
+    target_link_libraries(binary_prototype_csv PRIVATE ${OpenMP_CXX_LIBRARIES})
+    target_compile_options(binary_prototype_csv PRIVATE -Xpreprocessor -fopenmp)
+endif()

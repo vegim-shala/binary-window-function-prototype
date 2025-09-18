@@ -160,12 +160,12 @@ void ips4o_parallel_sort(Dataset &data, const std::string &order_column) {
 
 
 void SortUtils::sort_dataset(Dataset &data, const std::string &order_column) {
-    auto start = std::chrono::high_resolution_clock::now();
+    // auto start = std::chrono::high_resolution_clock::now();
 
     ips2ra_parallel_sort(data, order_column);
 
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
+    // auto end = std::chrono::high_resolution_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    // std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
 
 }

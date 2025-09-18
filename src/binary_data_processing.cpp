@@ -14,8 +14,8 @@ using namespace std;
 int main() {
     cout << "START PROCESSING:" << endl;
 
-    auto [input, input_schema] = read_csv("first_test/input3.csv");
-    auto [probe, probe_schema] = read_csv("first_test/probe3.csv");
+    auto [input, input_schema] = read_csv("first_test/input4.csv");
+    auto [probe, probe_schema] = read_csv("first_test/probe4.csv");
     // verify_binary_file("dynamic_columns.bin");
     // auto [data, schema] = read_binary("sensor.bin");
 
