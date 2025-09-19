@@ -1,10 +1,10 @@
 //
 // Created by Vegim Shala on 10.7.25.
 //
-#include "operators/window_function_operator.h"
+#include "../include/operators/window_function_operator.h"
 #include "operators/utils/frame_utils.h"
-#include "operators/utils/partition_utils.h"
-#include "operators/utils/sort_utils.h"
+#include "../include/operators/utils/partition_utils.h"
+#include "../include/operators/utils/sort_utils.h"
 
 
 using namespace std;

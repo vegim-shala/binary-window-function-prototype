@@ -13,12 +13,34 @@
 #include <filesystem>
 
 using ColumnValue = std::variant<int, double, std::string>;
-using DataRow = std::map<std::string, ColumnValue>;
+using DataRow = std::vector<ColumnValue>;
 using Dataset = std::vector<DataRow>;
 
 struct FileSchema {
     std::vector<std::string> columns;
-    std::map<std::string, std::string> column_types; // "int", "double", "string"  -- ALTHOUGH WE CAN ASSUME INT32 for everyone
+    std::map<std::string, std::string> column_types;
+    std::unordered_map<std::string, size_t> column_index; // NEW
+
+    void build_index() {
+        column_index.clear();
+        for (size_t i = 0; i < columns.size(); i++) {
+            column_index[columns[i]] = i;
+        }
+    }
+
+    size_t index_of(const std::string &col) const {
+        auto it = column_index.find(col);
+        if (it == column_index.end()) {
+            throw std::runtime_error("Column not found: " + col);
+        }
+        return it->second;
+    }
+
+    void add_column(const std::string &col_name, const std::string &type) {
+        columns.push_back(col_name);
+        column_types[col_name] = type;
+        column_index[col_name] = columns.size() - 1; // <-- index is new column position
+    }
 };
 
 // struct Row {
@@ -36,5 +58,6 @@ std::pair<Dataset, FileSchema> read_binary(const std::string& filename);
 
 // CSV functions
 std::pair<Dataset, FileSchema>  read_csv(const std::string& filename);
-void write_csv(const std::string& filename, const Dataset& dataset);
+std::pair<Dataset, FileSchema> read_csv_optimized(const std::string& filename);
+void write_csv(const std::string& filename, const Dataset& dataset, const FileSchema& schema);
 

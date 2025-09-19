@@ -8,93 +8,170 @@
 #include <vector>
 #include <unordered_map>
 #include <string>
+#include <atomic>
 
-std::unordered_map<std::string, Dataset> PartitionUtils::partition_dataset(
-    const Dataset& dataset,
-    const std::vector<std::string>& partition_columns
+// Safe integer extractor
+inline int32_t get_int32(const ColumnValue &val) {
+    return std::visit([](auto &&v) -> int32_t {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<T, int>) {
+            return v;
+        } else if constexpr (std::is_same_v<T, double>) {
+            return static_cast<int32_t>(v);
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            return std::stoi(v); // fallback (slow) – avoid if possible
+        } else {
+            throw std::runtime_error("Unsupported type in get_int32");
+        }
+    }, val);
+}
+
+PartitionUtils::PartitionResult PartitionUtils::partition_dataset(
+    Dataset &dataset,
+    const FileSchema &schema,
+    const std::vector<std::string> &partition_columns
 ) {
-    std::unordered_map<std::string, Dataset> partitions;
-
     if (partition_columns.empty()) {
-        partitions.insert({"__FULL_DATASET__", dataset});
+        std::unordered_map<std::vector<int32_t>, Dataset, PartitionUtils::VecHash, PartitionUtils::VecEq> result;
+        result[{}] = std::move(dataset);
+        return result;
+    }
+
+    // Precompute indices
+    std::vector<size_t> col_indices;
+    col_indices.reserve(partition_columns.size());
+    for (const auto &col : partition_columns) {
+        col_indices.push_back(schema.index_of(col));
+    }
+
+    // Specialized case: 1 column
+    if (partition_columns.size() == 1) {
+        std::unordered_map<int32_t, Dataset> partitions;
+        size_t col_idx = col_indices[0];
+        for (auto &row : dataset) {
+            int32_t key = get_int32(row[col_idx]);
+            partitions[key].emplace_back(std::move(row));
+        }
+        dataset.clear();
         return partitions;
     }
 
-    for (const auto& row : dataset) {
-        std::string key;
-        for (const auto& col : partition_columns) {
-            std::visit([&](const auto& value) {
-                std::stringstream ss;
-                ss << value;
-                key += ss.str() + "|";
-            }, row.at(col));
+    // Generic case: multiple columns
+    std::unordered_map<std::vector<int32_t>, Dataset, PartitionUtils::VecHash, PartitionUtils::VecEq> partitions;
+    std::vector<int32_t> key;
+    key.reserve(col_indices.size());
+    for (auto &row : dataset) {
+        key.clear();
+        for (size_t idx : col_indices) {
+            key.push_back(get_int32(row[idx]));
         }
-        partitions[key].push_back(row);
+        partitions[key].emplace_back(std::move(row));
     }
-
+    dataset.clear();
     return partitions;
 }
 
 
-std::unordered_map<std::string, Dataset> PartitionUtils::partition_dataset_parallel(
-    const Dataset& dataset,
-    const std::vector<std::string>& partition_columns,
-    size_t num_threads
+
+
+PartitionUtils::PartitionResult PartitionUtils::partition_dataset_morsel(
+    Dataset &dataset,
+    const FileSchema &schema,
+    const std::vector<std::string> &partition_columns,
+    size_t num_threads,
+    size_t morsel_size
 ) {
     if (partition_columns.empty()) {
-        return {{"__FULL_DATASET__", dataset}};
+        std::unordered_map<std::vector<int32_t>, Dataset, PartitionUtils::VecHash, PartitionUtils::VecEq> result;
+        result[{}] = std::move(dataset);
+        return result;
     }
 
-    // We shard the partitions map into num_threads buckets
-    std::vector<std::unordered_map<std::string, Dataset>> shards(num_threads);
-    std::vector<std::mutex> shard_locks(num_threads);
+    // Precompute indices
+    std::vector<size_t> col_indices;
+    col_indices.reserve(partition_columns.size());
+    for (const auto &col : partition_columns) {
+        col_indices.push_back(schema.index_of(col));
+    }
 
     size_t n = dataset.size();
-    size_t chunk_size = (n + num_threads - 1) / num_threads;
+    std::atomic<size_t> next_morsel(0);
 
-    auto worker = [&](size_t tid) {
-        size_t start = tid * chunk_size;
-        size_t end = std::min(start + chunk_size, n);
+    if (partition_columns.size() == 1) {
+        std::vector<std::unordered_map<int32_t, Dataset>> thread_partitions(num_threads);
 
-        for (size_t i = start; i < end; i++) {
-            const auto& row = dataset[i];
+        auto worker = [&](size_t tid) {
+            auto &local = thread_partitions[tid];
+            while (true) {
+                size_t start = next_morsel.fetch_add(morsel_size);
+                if (start >= n) break;
+                size_t end = std::min(start + morsel_size, n);
 
-            // Build partition key
-            std::string key;
-            for (const auto& col : partition_columns) {
-                std::visit([&](const auto& value) {
-                    std::stringstream ss;
-                    ss << value;
-                    key += ss.str() + "|";
-                }, row.at(col));
+                for (size_t i = start; i < end; ++i) {
+                    int32_t key = get_int32(dataset[i][col_indices[0]]);
+                    local[key].emplace_back(std::move(dataset[i]));
+                }
             }
+        };
 
-            // Choose shard (hash of key % num_threads)
-            size_t shard_id = std::hash<std::string>{}(key) % num_threads;
+        // Launch threads
+        std::vector<std::thread> threads;
+        for (size_t t = 0; t < num_threads; ++t) {
+            threads.emplace_back(worker, t);
+        }
+        for (auto &th : threads) th.join();
 
-            {
-                std::lock_guard<std::mutex> lock(shard_locks[shard_id]);
-                shards[shard_id][key].push_back(row);
+        // Merge
+        std::unordered_map<int32_t, Dataset> global;
+        for (auto &tp : thread_partitions) {
+            for (auto &kv : tp) {
+                auto &vec = global[kv.first];
+                std::move(kv.second.begin(), kv.second.end(), std::back_inserter(vec));
             }
         }
-    };
+        dataset.clear();
+        return global;
 
-    std::vector<std::thread> threads;
-    for (size_t t = 0; t < num_threads; t++) {
-        threads.emplace_back(worker, t);
-    }
-    for (auto& th : threads) th.join();
+    } else {
+        std::vector<std::unordered_map<std::vector<int32_t>, Dataset, PartitionUtils::VecHash, PartitionUtils::VecEq>> thread_partitions(num_threads);
 
-    // Merge shards into final result
-    std::unordered_map<std::string, Dataset> partitions;
-    for (auto& shard : shards) {
-        for (auto& [key, rows] : shard) {
-            auto& dest = partitions[key];
-            dest.insert(dest.end(), rows.begin(), rows.end());
+        auto worker = [&](size_t tid) {
+            auto &local = thread_partitions[tid];
+            std::vector<int32_t> key;
+            key.reserve(col_indices.size());
+
+            while (true) {
+                size_t start = next_morsel.fetch_add(morsel_size);
+                if (start >= n) break;
+                size_t end = std::min(start + morsel_size, n);
+
+                for (size_t i = start; i < end; ++i) {
+                    key.clear();
+                    for (size_t idx : col_indices) {
+                        key.push_back(get_int32(dataset[i][idx]));
+                    }
+                    local[key].emplace_back(std::move(dataset[i]));
+                }
+            }
+        };
+
+        std::vector<std::thread> threads;
+        for (size_t t = 0; t < num_threads; ++t) {
+            threads.emplace_back(worker, t);
         }
-    }
+        for (auto &th : threads) th.join();
 
-    return partitions;
+        // Merge
+        std::unordered_map<std::vector<int32_t>, Dataset, PartitionUtils::VecHash, PartitionUtils::VecEq> global;
+        for (auto &tp : thread_partitions) {
+            for (auto &kv : tp) {
+                auto &vec = global[kv.first];
+                std::move(kv.second.begin(), kv.second.end(), std::back_inserter(vec));
+            }
+        }
+        dataset.clear();
+        return global;
+    }
 }
 
 

@@ -5,7 +5,6 @@
 #pragma once
 #include <string>
 #include "aggregators/factory.h"
-#include "operators/utils/frame_utils.h"
 #include "data_io.h"
 
 struct WindowFunctionModel {

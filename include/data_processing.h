@@ -6,7 +6,6 @@
 #define DATA_PROCESSING_H
 #include <numeric>
 #include "aggregators/factory.h"
-#include "operators/utils/frame_utils.h"
 
 #endif //DATA_PROCESSING_H
 

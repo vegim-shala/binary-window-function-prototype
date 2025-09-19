@@ -193,14 +193,14 @@ void ips4o_parallel_sort(std::vector<size_t>& data) {
 
 int main() {
     // Create a vector with 10 million elements (1e7 is 10 million, 1e6 is 1 million) and fill it with random integers
-    const int size = 1e5;
+    const int size = 1e7;
     std::vector<size_t> data(size);
     std::generate(data.begin(), data.end(), std::rand);
 
     // Divide every element by size to reduce the range of values for counting sort
-    // for (auto& num : data) {
-    //     num = num % (size/10); // Reduce range to 0-999 for counting sort
-    // }
+    for (auto& num : data) {
+        num = num % (size/100); // Reduce range to 0-999 for counting sort
+    }
 
     // Time the sorting
     auto start = std::chrono::high_resolution_clock::now();

@@ -6,15 +6,7 @@
 
 #include <iostream>
 
-using OrderKey = std::vector<double>;
 
-OrderKey extract_order_key_join(const DataRow& row, const std::vector<std::string>& order_columns) {
-    OrderKey key;
-    for (const auto& col : order_columns) {
-        key.push_back(extract_numeric(row.at(col)));
-    }
-    return key;
-}
 
 void JoinUtils::pretty_print_segment_tree() const {
     if (segtree.empty()) {
@@ -48,14 +40,17 @@ void JoinUtils::pretty_print_segment_tree() const {
     }
 }
 
-void JoinUtils::build_index(const Dataset& input, std::string& value_column) {
+void JoinUtils::build_index(const Dataset& input, const FileSchema &schema, std::string& value_column) {
     n = input.size();
     keys.resize(n);
     std::vector<double> values(n);
 
+    size_t order_idx = schema.index_of(order_column);
+    size_t value_idx = schema.index_of(value_column);
+
     for (size_t i = 0; i < n; i++) {
-        keys[i] = extract_numeric(input[i].at(order_column));
-        values[i] = extract_numeric(input[i].at(value_column));
+        keys[i] = extract_numeric(input[i][order_idx]);
+        values[i] = extract_numeric(input[i][value_idx]);
         // default: sum over value_column, adjust if needed
     }
 
@@ -83,14 +78,17 @@ double JoinUtils::seg_query(size_t l, size_t r) const {
     return res;
 }
 
-double JoinUtils::compute_sum_range(const Dataset& input, const DataRow& probe_row,
+double JoinUtils::compute_sum_range(const Dataset& input, const FileSchema &schema, const DataRow& probe_row,
                                     const std::string& start_col, const std::string& end_col) const {
     if (n == 0) return 0.0;
 
+    size_t start_idx = start_col.empty() ? SIZE_MAX : schema.index_of(start_col);
+    size_t end_idx   = end_col.empty()   ? SIZE_MAX : schema.index_of(end_col);
+
     double start = start_col.empty() ? -std::numeric_limits<double>::infinity()
-                                     : extract_numeric(probe_row.at(start_col));
+                                     : extract_numeric(probe_row[start_idx]);
     double end   = end_col.empty()   ? std::numeric_limits<double>::infinity()
-                                     : extract_numeric(probe_row.at(end_col));
+                                     : extract_numeric(probe_row[end_idx]);
 
     auto lo_it = std::lower_bound(keys.begin(), keys.end(), start);
     auto hi_it = std::upper_bound(keys.begin(), keys.end(), end);
@@ -103,16 +101,22 @@ double JoinUtils::compute_sum_range(const Dataset& input, const DataRow& probe_r
 }
 
 std::vector<size_t> JoinUtils::compute_range_join(
-    const Dataset& input, const DataRow& probe_row,
+    const Dataset& input, const FileSchema &schema, const DataRow& probe_row,
     const std::string& start_col, const std::string& end_col) const
 {
      std::vector<size_t> indices;
 
-     double start = start_col.empty() ? std::numeric_limits<double>::min() : extract_numeric(probe_row.at(start_col));
-     double end = end_col.empty() ? std::numeric_limits<double>::max() : extract_numeric(probe_row.at(end_col));
+     size_t start_idx = start_col.empty() ? SIZE_MAX : schema.index_of(start_col);
+     size_t end_idx   = end_col.empty()   ? SIZE_MAX : schema.index_of(end_col);
+
+
+     double start = start_col.empty() ? std::numeric_limits<double>::min() : extract_numeric(probe_row[start_idx]);
+     double end = end_col.empty() ? std::numeric_limits<double>::max() : extract_numeric(probe_row[end_idx]);
+
+     size_t order_idx  = schema.index_of(order_column);
 
      for (size_t j = 0; j < input.size(); ++j) {
-         double value = extract_numeric(input[j].at(order_column));
+         double value = extract_numeric(input[j][order_idx]);
          if (value >= start && value <= end) {
              indices.push_back(j);
          }
@@ -128,10 +132,10 @@ void JoinUtils::validate() const {
     // TODO: Add further validations here...
 }
 
-std::vector<size_t> JoinUtils::compute_join(const Dataset& input, const DataRow& probe_row) const {
+std::vector<size_t> JoinUtils::compute_join(const Dataset& input, const FileSchema &schema, const DataRow& probe_row) const {
     validate();
     if (join_spec.type == JoinType::RANGE) {
-        return compute_range_join(input, probe_row, join_spec.begin_column, join_spec.end_column);
+        return compute_range_join(input, schema, probe_row, join_spec.begin_column, join_spec.end_column);
     }
     // else if (join_spec.type == JoinType::RANGE) {
     //     return compute_rows_join(input, probe_row, join_spec.begin_column, join_spec.end_column);

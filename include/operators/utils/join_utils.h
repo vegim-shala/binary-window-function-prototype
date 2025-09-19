@@ -21,18 +21,18 @@ public:
 
     void pretty_print_segment_tree() const;
 
-    void build_index(const Dataset& input, std::string& value_column);
+    void build_index(const Dataset& input, const FileSchema &schema, std::string& value_column);
 
     // New: Direct SUM computation via binary search + segment tree
-    double compute_sum_range(const Dataset& input, const DataRow& probe_row,
+    double compute_sum_range(const Dataset& input, const FileSchema &schema, const DataRow& probe_row,
                              const std::string& start_col, const std::string& end_col) const;
 
 
     std::vector<size_t> compute_range_join(
-        const Dataset& input, const DataRow& probe_row,
+        const Dataset& input, const FileSchema &schema, const DataRow& probe_row,
         const std::string& begin_col, const std::string& end_col) const;
 
-    std::vector<size_t> compute_join(const Dataset& input, const DataRow& probe_row) const;
+    std::vector<size_t> compute_join(const Dataset& input, const FileSchema &schema, const DataRow& probe_row) const;
 
     void validate() const;
 

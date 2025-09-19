@@ -4,6 +4,9 @@
 #include <sstream>
 #include <iostream>
 #include <algorithm>
+#include <vector>
+#include <string>
+#include <charconv>
 
 namespace fs = std::filesystem;
 
@@ -61,8 +64,8 @@ void write_binary(const std::string& filename, const Dataset& dataset, const Fil
 
     // Write data
     for (const auto& row : dataset) {
-        for (const auto& col : schema.columns) {
-            const auto& value = row.at(col);
+        for (size_t i = 0; i < row.size(); ++i) {
+            const auto& value = row[i];
             std::visit([&file](auto&& arg) {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, int>) {
@@ -177,15 +180,15 @@ std::pair<Dataset, FileSchema> read_binary(const std::string& filename) {
                 if (type == "int32") {
                     int32_t val;
                     file.read(reinterpret_cast<char*>(&val), sizeof(val));
-                    row[col] = val;
+                    row.push_back(val);
                 }
                 else if (type == "double") {
                     double val;
                     file.read(reinterpret_cast<char*>(&val), sizeof(val));
-                    row[col] = val;
+                    row.push_back(val);
                 }
                 else if (type == "string") {
-                    row[col] = read_string();
+                    row.push_back(read_string());
                 }
                 else {
                     throw std::runtime_error("Unknown column type: " + type);
@@ -255,6 +258,7 @@ std::pair<Dataset, FileSchema>  read_csv(const std::string& filename) {
     }
 
     FileSchema schema = detect_schema(line);
+    schema.build_index();
 
     while (std::getline(file, line)) {
         std::istringstream ss(line);
@@ -270,7 +274,7 @@ std::pair<Dataset, FileSchema>  read_csv(const std::string& filename) {
                 column_type = schema.column_types[column_name]; // if specified, get the schema type
             }
 
-            row[column_name] = parse_value(value, column_type); // parse the value and store it in the DataRow
+            row.push_back(parse_value(value, column_type)); // parse the value and store it in the DataRow
             count++;
         }
 
@@ -279,8 +283,94 @@ std::pair<Dataset, FileSchema>  read_csv(const std::string& filename) {
 
     return {dataset, schema};
 }
+ColumnValue parse_value_optimized(const std::string& value, const std::string& type) {
+    if (type == "int32" || type == "int") {
+        // Use fast integer parsing
+        int32_t result = 0;
+        auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), result);
+        if (ec == std::errc()) {
+            return result;
+        }
+        return 0; // Fallback
+    }
+    else {
+        return value; // String case
+    }
+}
 
-void write_csv(const std::string& filename, const Dataset& dataset) {
+std::pair<Dataset, FileSchema> read_csv_optimized(const std::string& filename) {
+    Dataset dataset;
+    fs::path filepath = get_data_path() / filename;
+
+    // Use larger buffer for file reading
+    std::ifstream file(filepath);
+    if (!file) {
+        throw std::runtime_error("Cannot open CSV file: " + filepath.string());
+    }
+
+    // Set larger buffer size
+    constexpr size_t BUFFER_SIZE = 64 * 1024; // 64KB buffer
+    char buffer[BUFFER_SIZE];
+    file.rdbuf()->pubsetbuf(buffer, BUFFER_SIZE);
+
+    std::string line;
+    if (!std::getline(file, line)) {
+        throw std::runtime_error("CSV file is empty");
+    }
+
+    FileSchema schema = detect_schema(line);
+    schema.build_index();
+
+    // Precompute column types by index for O(1) access
+    std::vector<std::string> column_types_by_index;
+    column_types_by_index.reserve(schema.columns.size());
+    for (const auto& col_name : schema.columns) {
+        auto it = schema.column_types.find(col_name);
+        column_types_by_index.push_back((it != schema.column_types.end()) ? it->second : "string");
+    }
+
+    dataset.reserve(1000000); // Reserve space for ~1M rows to reduce reallocations
+
+    // Reuse these variables to avoid allocations
+    std::string value;
+    value.reserve(256); // Reserve reasonable space for values
+
+    size_t line_count = 0;
+    const size_t num_columns = schema.columns.size();
+
+    while (std::getline(file, line)) {
+        DataRow row;
+        row.reserve(num_columns); // Pre-allocate row capacity
+
+        std::istringstream ss(std::move(line)); // Move line into stringstream
+        size_t count = 0;
+
+        while (std::getline(ss, value, ',')) {
+            if (count >= num_columns) break;
+
+            // Direct O(1) access to column type
+            const std::string& column_type = column_types_by_index[count];
+            row.push_back(parse_value_optimized(value, column_type));
+            count++;
+        }
+
+        // Fill missing columns with defaults if needed
+        while (row.size() < num_columns) {
+            row.push_back(ColumnValue{0}); // Or appropriate default
+        }
+
+        dataset.push_back(std::move(row));
+
+        // Optional: Reserve more space periodically
+        if (++line_count % 100000 == 0) {
+            dataset.reserve(dataset.size() + 100000);
+        }
+    }
+
+    return {dataset, schema};
+}
+
+void write_csv(const std::string& filename, const Dataset& dataset, const FileSchema& schema) {
     if (dataset.empty()) {
         throw std::runtime_error("Empty dataset, nothing to write");
     }
@@ -293,9 +383,8 @@ void write_csv(const std::string& filename, const Dataset& dataset) {
     }
 
     // Write header row (column names)
-    const auto& first_row = dataset[0];
     bool first_column = true; // used to avoid trailing comma
-    for (const auto& [col_name, _] : first_row) {
+    for (const auto& col_name : schema.columns) {
         if (!first_column) file << ","; // if it's not the first column, output a comma
         file << col_name; // output column name
         first_column = false;
@@ -305,7 +394,7 @@ void write_csv(const std::string& filename, const Dataset& dataset) {
     // Write data rows
     for (const auto& row : dataset) {
         first_column = true;
-        for (const auto& [col_name, value] : row) {
+        for (size_t i = 0; i < row.size(); ++i) {
             if (!first_column) file << ",";
 
             // looks inside the variant, captures the output file stream by reference, and arg will match whatever type is in the variant
@@ -328,7 +417,7 @@ void write_csv(const std::string& filename, const Dataset& dataset) {
                 } else {
                     file << arg; // Numbers don't need escaping
                 }
-            }, value);
+            }, row[i]);
 
             first_column = false;
         }
@@ -365,7 +454,7 @@ void print_dataset(const Dataset& data, const FileSchema& schema, size_t max_row
     size_t rows_to_print = std::min(data.size(), max_rows);
     for (size_t i = 0; i < rows_to_print; ++i) {
         const auto& row = data[i];
-        for (const auto& col : schema.columns) {
+        for (size_t j = 0; j < row.size(); ++j) {
             std::visit([&](auto&& arg) {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, int>) {
@@ -377,7 +466,7 @@ void print_dataset(const Dataset& data, const FileSchema& schema, size_t max_row
                     if (arg.length() > 12) truncated += "...";
                     std::cout << std::setw(15) << truncated << " |";
                 }
-            }, row.at(col));
+            }, row[j]);
         }
         std::cout << "\n";
     }

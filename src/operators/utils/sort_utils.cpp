@@ -41,14 +41,17 @@ void counting_sort_by_digit(std::vector<DataRow> &data, std::vector<int> &keys, 
     keys = std::move(output_keys);
 }
 
-void SortUtils::radix_sort_rows(std::vector<DataRow> &data, std::string order_column) {
+void radix_sort_rows(std::vector<DataRow> &data, const FileSchema &schema, std::string order_column) {
     if (data.empty()) return;
 
     // 1. Extract keys and find the maximum value
     std::vector<int> keys;
     keys.reserve(data.size());
+
+    size_t order_idx  = schema.index_of(order_column);
+
     for (const auto &row: data) {
-        keys.push_back(extract_numeric(row.at(order_column)));
+        keys.push_back(extract_numeric(row[order_idx]));
     }
     int max_key = *std::max_element(keys.begin(), keys.end());
 
@@ -58,12 +61,15 @@ void SortUtils::radix_sort_rows(std::vector<DataRow> &data, std::string order_co
     }
 }
 
-void SortUtils::counting_sort_rows(std::vector<DataRow> &data, std::string order_column) {
+void counting_sort_rows(std::vector<DataRow> &data, const FileSchema &schema, std::string order_column) {
     // 1. First, extract all the keys into a vector.
     std::vector<int> keys;
     keys.reserve(data.size());
+
+    size_t order_idx  = schema.index_of(order_column);
+
     for (const auto &row: data) {
-        keys.push_back(extract_numeric(row.at(order_column)));
+        keys.push_back(extract_numeric(row[order_idx]));
     }
 
     // 2. Find the min and max key to determine the range
@@ -106,10 +112,11 @@ void SortUtils::counting_sort_rows(std::vector<DataRow> &data, std::string order
  * @param data
  * @param order_column
  */
-void ips2ra_sort(Dataset &data, const std::string &order_column) {
+void ips2ra_sort(Dataset &data, const FileSchema &schema,  const std::string &order_column) {
+  	size_t order_idx  = schema.index_of(order_column);
     ips2ra::sort(data.begin(), data.end(),
                            [&](const DataRow &row) {
-                               return static_cast<size_t>(extract_numeric(row.at(order_column)));
+                               return static_cast<size_t>(extract_numeric(row[order_idx]));
                            });
 };
 
@@ -120,10 +127,11 @@ void ips2ra_sort(Dataset &data, const std::string &order_column) {
  * @param data
  * @param order_column
  */
-void ips2ra_parallel_sort(Dataset &data, const std::string &order_column) {
+void ips2ra_parallel_sort(Dataset &data, const FileSchema &schema, const std::string &order_column) {
+  	size_t order_idx  = schema.index_of(order_column);
     ips2ra::parallel::sort(data.begin(), data.end(),
                            [&](const DataRow &row) {
-                               return static_cast<size_t>(extract_numeric(row.at(order_column)));
+                               return static_cast<size_t>(extract_numeric(row[order_idx]));
                            });
 };
 
@@ -134,10 +142,11 @@ void ips2ra_parallel_sort(Dataset &data, const std::string &order_column) {
  * @param data
  * @param order_column
  */
-void ips4o_sort(Dataset &data, const std::string &order_column) {
+void ips4o_sort(Dataset &data, const FileSchema &schema, const std::string &order_column) {
+  	size_t order_idx  = schema.index_of(order_column);
     ips4o::sort(data.begin(), data.end(),
                 [&](const DataRow &a, const DataRow &b) {
-                    return extract_numeric(a.at(order_column)) < extract_numeric(b.at(order_column));
+                    return extract_numeric(a[order_idx]) < extract_numeric(b[order_idx]);
                 });
 };
 
@@ -148,21 +157,22 @@ void ips4o_sort(Dataset &data, const std::string &order_column) {
  * @param data
  * @param order_column
  */
-void ips4o_parallel_sort(Dataset &data, const std::string &order_column) {
+void ips4o_parallel_sort(Dataset &data, const FileSchema &schema, const std::string &order_column) {
+  	size_t order_idx  = schema.index_of(order_column);
     ips4o::parallel::sort(
         data.begin(),
         data.end(),
         [&](const DataRow &a, const DataRow &b) {
-            return extract_numeric(a.at(order_column)) < extract_numeric(b.at(order_column));
+            return extract_numeric(a[order_idx]) < extract_numeric(b[order_idx]);
         }
     );
 };
 
 
-void SortUtils::sort_dataset(Dataset &data, const std::string &order_column) {
+void SortUtils::sort_dataset(Dataset &data, const FileSchema &schema, const std::string &order_column) {
     // auto start = std::chrono::high_resolution_clock::now();
 
-    ips2ra_parallel_sort(data, order_column);
+    ips2ra_parallel_sort(data, schema, order_column);
 
     // auto end = std::chrono::high_resolution_clock::now();
     // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);

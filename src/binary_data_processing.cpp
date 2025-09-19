@@ -14,8 +14,8 @@ using namespace std;
 int main() {
     cout << "START PROCESSING:" << endl;
 
-    auto [input, input_schema] = read_csv("first_test/input4.csv");
-    auto [probe, probe_schema] = read_csv("first_test/probe4.csv");
+    auto [input, input_schema] = read_csv_optimized("first_test/input4.csv");
+    auto [probe, probe_schema] = read_csv_optimized("first_test/probe4.csv");
     // verify_binary_file("dynamic_columns.bin");
     // auto [data, schema] = read_binary("sensor.bin");
 
@@ -42,7 +42,7 @@ int main() {
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    auto [result, new_schema] = op.execute(input, probe, probe_schema);
+    auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
 
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -51,7 +51,7 @@ int main() {
     print_dataset(result, new_schema, 100);
 
     cout << "Output: " << endl;
-    write_csv("first_test/output3.csv", result);
+    write_csv("first_test/output3.csv", result, new_schema);
 
     return 0;
 }

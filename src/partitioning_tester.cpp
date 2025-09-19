@@ -1,229 +1,601 @@
-#include <iostream>
+#include "data_io.h"
 #include <vector>
-#include <algorithm> // Required for std::sort and std::generate
-#include <chrono>    // Required for timing
-#include <cstdlib>   // Required for std::rand
-#include "ips2ra.hpp"
-#include "ips4o/ips4o.hpp"
+#include <iostream>
+#include "data_processing.h"
+#include <chrono>
+#include <thread>
+#include <mutex>
+#include <unordered_map>
+#include <string>
 
-int compare_ints(const void* a, const void* b) {
-    int arg1 = *static_cast<const int*>(a);
-    int arg2 = *static_cast<const int*>(b);
-    if (arg1 < arg2) return -1;
-    if (arg1 > arg2) return 1;
-    return 0;
+using namespace std;
+
+#include <cstddef>
+#include <cstdint>
+#include <omp.h>
+
+// Safe integer extractor
+inline int32_t get_int32(const ColumnValue &val) {
+    return std::visit([](auto &&v) -> int32_t {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<T, int>) {
+            return v;
+        } else if constexpr (std::is_same_v<T, double>) {
+            return static_cast<int32_t>(v);
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            return std::stoi(v); // fallback (slow) – avoid if possible
+        } else {
+            throw std::runtime_error("Unsupported type in get_int32");
+        }
+    }, val);
 }
 
-// ------------------------------------------------------------------------------
-// Sorting Algorithms
-// ------------------------------------------------------------------------------
-
-// ---------------------------    BASIC SORT    -------------------------------
-
-/**
- * For 10 million records -> 600-700 ms
- * @param data
- */
-void basic_sort(std::vector<size_t>& data) {
-    std::sort(data.begin(), data.end());
+// Custom hash for vector<int64_t>
+struct VecHash {
+    std::size_t operator()(const std::vector<int32_t> &v) const noexcept {
+        std::size_t h = 0;
+        for (auto x: v) {
+            // Simple hash combine - avoid expensive operations
+            h ^= std::hash<int32_t>{}(x) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        }
+        return h;
+    }
 };
 
-// ---------------------------    QSORT    -------------------------------
-
-/**
- * For 10 million records -> 800-900 ms
- * @param data
- */
-void qsort(std::vector<size_t>& data) {
-    std::qsort(data.data(), data.size(), sizeof(size_t), compare_ints);
+struct VecEq {
+    bool operator()(const std::vector<int32_t> &a,
+                    const std::vector<int32_t> &b) const noexcept {
+        return a == b;
+    }
 };
 
-// ---------------------------    STABLE SORT    -------------------------------
+using PartitionResult = std::variant<
+    std::unordered_map<int32_t, Dataset>,
+    std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>
+>;
 
-/**
- * For 10 million records -> ~ 500-600 ms
- * @param data
- */
-void stable_sort(std::vector<size_t>& data) {
-    std::stable_sort(data.begin(), data.end());
-};
-
-// ---------------------------    RADIX SORT    -------------------------------
-
-// Helper function for Radix Sort
-void counting_sort_by_digit(std::vector<size_t>& data, int exp) {
-    std::vector<size_t> output(data.size());
-    std::vector<int> count(10, 0); // Digits 0-9
-
-    // Store count of occurrences in count[]
-    for (int i : data) {
-        int digit = (i / exp) % 10;
-        count[digit]++;
+PartitionResult partition_dataset(
+    Dataset &dataset,
+    const FileSchema &schema,
+    const std::vector<std::string> &partition_columns
+) {
+    if (partition_columns.empty()) {
+        std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> result;
+        result[{}] = std::move(dataset);
+        return result;
     }
 
-    // Change count[i] so that count[i] now contains the actual
-    // position of this digit in output[]
-    for (int i = 1; i < 10; i++) {
-        count[i] += count[i - 1];
+    // Precompute indices
+    std::vector<size_t> col_indices;
+    col_indices.reserve(partition_columns.size());
+    for (const auto &col : partition_columns) {
+        col_indices.push_back(schema.index_of(col));
     }
 
-    // Build the output array, processing the original array from the end to maintain stability
-    for (int i = data.size() - 1; i >= 0; i--) {
-        int digit = (data[i] / exp) % 10;
-        output[count[digit] - 1] = data[i];
-        count[digit]--;
+    // Specialized case: 1 column
+    if (partition_columns.size() == 1) {
+        std::unordered_map<int32_t, Dataset> partitions;
+        size_t col_idx = col_indices[0];
+        for (auto &row : dataset) {
+            int32_t key = get_int32(row[col_idx]);
+            partitions[key].emplace_back(std::move(row));
+        }
+        dataset.clear();
+        return partitions;
     }
 
-    // Copy the output array to data[], so that data[] now contains sorted numbers by current digit
-    data = std::move(output);
-}
-
-/**
- * For 10 million records -> ~200-300 ms (Often significantly faster than std::sort for integers)
- * @param data
- */
-void radix_sort(std::vector<size_t>& data) {
-    if (data.empty()) return;
-
-    // Find the maximum number to know the number of digits
-    int max = *std::max_element(data.begin(), data.end());
-
-    // Do counting sort for every digit. Note that instead of passing digit number,
-    // we pass exp, which is 10^i where i is the current digit number.
-    for (int exp = 1; max / exp > 0; exp *= 10) {
-        counting_sort_by_digit(data, exp);
+    // Generic case: multiple columns
+    std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> partitions;
+    std::vector<int32_t> key;
+    key.reserve(col_indices.size());
+    for (auto &row : dataset) {
+        key.clear();
+        for (size_t idx : col_indices) {
+            key.push_back(get_int32(row[idx]));
+        }
+        partitions[key].emplace_back(std::move(row));
     }
-}
-
-// ---------------------------    COUNTING SORT    -------------------------------
-
-/**
- * For 10 million records -> ~20-100 ms (Extremely fast if value range is small, e.g., 0-100)
- * WARNING: Will use massive memory and crash if max_val is large (e.g., RAND_MAX)!
- * @param data
- */
-void counting_sort(std::vector<size_t>& data) {
-    if (data.empty()) return;
-
-    int min_val = *std::min_element(data.begin(), data.end());
-    int max_val = *std::max_element(data.begin(), data.end());
-
-    // Range of numbers
-    int range = max_val - min_val + 1;
-
-    // Check if the range is sane to prevent massive memory allocation
-    // RAND_MAX is 32767 on some systems, which is a range of 65536 - manageable.
-    // But if you have full 32-bit integers, the range is 4 billion - NOT manageable.
-    if (range > 1000000) { // Arbitrary safety limit
-        std::cerr << "Warning: Range too large for Counting Sort (" << range << "). Falling back to std::sort.\n";
-        std::sort(data.begin(), data.end());
-        return;
-    }
-
-    std::vector<int> count(range, 0);
-    std::vector<size_t> output(data.size());
-
-    // Store the count of each number, shifted by min_val
-    for (int i : data) {
-        count[i - min_val]++;
-    }
-
-    // Change count[i] so that it contains the actual position of this number in the output
-    for (int i = 1; i < range; i++) {
-        count[i] += count[i - 1];
-    }
-
-    // Build the output array (from the end to maintain stability)
-    for (int i = data.size() - 1; i >= 0; i--) {
-        int index = data[i] - min_val;
-        output[count[index] - 1] = data[i];
-        count[index]--;
-    }
-
-    // Copy the output back to the original array
-    data = std::move(output);
+    dataset.clear();
+    return partitions;
 }
 
 
+// Parallel partitioning
+PartitionResult partition_dataset_parallel(
+    Dataset &dataset,
+    const FileSchema &schema,
+    const std::vector<std::string> &partition_columns,
+    size_t num_threads = std::thread::hardware_concurrency()
+) {
+    if (partition_columns.empty()) {
+        std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> result;
+        result[{}] = std::move(dataset);
+        return result;
+    }
 
-// ---------------------------    IPS2RA SORT    -------------------------------
+    // Precompute column indices
+    std::vector<size_t> col_indices;
+    col_indices.reserve(partition_columns.size());
+    for (const auto &col : partition_columns) {
+        col_indices.push_back(schema.index_of(col));
+    }
 
-/**
- * For 10 million records -> 150-200 ms
- * @param data
- */
-void ips2ra_sort(std::vector<size_t>& data) {
-    ips2ra::sort(data.begin(), data.end(), [](size_t x) { return x; });
-};
+    size_t n = dataset.size();
+    size_t chunk_size = (n + num_threads - 1) / num_threads;
 
-// ---------------------------    IPS2RA PARALLEL SORT    -------------------------------
+    if (partition_columns.size() == 1) {
+        // Thread-local maps for int32 keys
+        std::vector<std::unordered_map<int32_t, Dataset>> thread_partitions(num_threads);
 
-/**
- * For 10 million records -> 30-70 ms for 4 threads
- * @param data
- */
-void ips2ra_parallel_sort(std::vector<size_t>& data) {
-    ips2ra::parallel::sort(data.begin(), data.end(), [](size_t x) { return x; });
-};
+        #pragma omp parallel num_threads(num_threads)
+        {
+            int tid = omp_get_thread_num();
+            auto &local = thread_partitions[tid];
+            size_t start = tid * chunk_size;
+            size_t end = std::min(start + chunk_size, n);
+
+            for (size_t i = start; i < end; ++i) {
+                int32_t key = get_int32(dataset[i][col_indices[0]]);
+                local[key].emplace_back(std::move(dataset[i]));
+            }
+        }
+
+        // Merge results
+        std::unordered_map<int32_t, Dataset> global;
+        for (auto &tp : thread_partitions) {
+            for (auto &kv : tp) {
+                auto &vec = global[kv.first];
+                std::move(kv.second.begin(), kv.second.end(), std::back_inserter(vec));
+            }
+        }
+        dataset.clear();
+        return global;
+    } else {
+        // Thread-local maps for vector<int32_t> keys
+        std::vector<std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>> thread_partitions(num_threads);
+
+        #pragma omp parallel num_threads(num_threads)
+        {
+            int tid = omp_get_thread_num();
+            auto &local = thread_partitions[tid];
+            size_t start = tid * chunk_size;
+            size_t end = std::min(start + chunk_size, n);
+
+            std::vector<int32_t> key;
+            key.reserve(col_indices.size());
+
+            for (size_t i = start; i < end; ++i) {
+                key.clear();
+                for (size_t idx : col_indices) {
+                    key.push_back(get_int32(dataset[i][idx]));
+                }
+                local[key].emplace_back(std::move(dataset[i]));
+            }
+        }
+
+        // Merge results
+        std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> global;
+        for (auto &tp : thread_partitions) {
+            for (auto &kv : tp) {
+                auto &vec = global[kv.first];
+                std::move(kv.second.begin(), kv.second.end(), std::back_inserter(vec));
+            }
+        }
+        dataset.clear();
+        return global;
+    }
+}
 
 
-// ---------------------------    IPS4O SORT    -------------------------------
+bool compare_datasets(const Dataset& d1, const Dataset& d2) {
+    if (d1.size() != d2.size()) {
+        std::cout << "Datasets have different sizes." << std::endl;
+        return false;
+    }
 
-/**
- * For 10 million records -> 200-250 ms
- * @param data
- */
-void ips4o_sort(std::vector<size_t>& data) {
-    ips4o::sort(data.begin(), data.end());
-};
+    // Create copies to sort. Sorting by row to enable a consistent comparison.
+    // Assuming Row has a way to be compared, e.g., a custom operator< or a way to convert to a sortable type.
+    // For now, let's assume Row can be sorted, e.g., it is a vector of simple types.
+    Dataset sorted_d1 = d1;
+    Dataset sorted_d2 = d2;
+    std::sort(sorted_d1.begin(), sorted_d1.end());
+    std::sort(sorted_d2.begin(), sorted_d2.end());
 
-// ---------------------------    IPS4O PARALLEL SORT    -------------------------------
+    if (sorted_d1 != sorted_d2) {
+        std::cout << "Datasets contain different rows." << std::endl;
+        return false;
+    }
 
-/**
- * For 10 million records -> 50-70 ms
- * @param data
- */
-void ips4o_parallel_sort(std::vector<size_t>& data) {
-    ips4o::parallel::sort(
-        data.begin(),
-        data.end(),
-        std::less<>()
-    );
-};
+    return true;
+}
+
+bool compare_partition_outputs(
+    std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>& p1,
+    std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>& p2)
+{
+    if (p1.size() != p2.size()) {
+        std::cout << "Number of partitions is different." << std::endl;
+        return false;
+    }
+
+    for (const auto& pair : p1) {
+        const auto& key = pair.first;
+        const auto& dataset1 = pair.second;
+
+        // Check if the key exists in the second map
+        if (p2.find(key) == p2.end()) {
+            std::cout << "Key not found in second map." << std::endl;
+            return false;
+        }
+
+        const auto& dataset2 = p2.at(key);
+
+        // Compare the datasets for this key
+        if (!compare_datasets(dataset1, dataset2)) {
+            std::cout << "Datasets for key differ: ";
+            for (int32_t val : key) {
+                std::cout << val << " ";
+            }
+            std::cout << std::endl;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+
+
+
+// ThIS COULD BE USED FOR DISPATCHING IF NEEDED AND COULD BE FASTER BY 15 MILLISECONDS -> to be checked for 10 millions
+// // Generic version for multiple columns
+// std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>
+// partition_dataset_impl(
+//     Dataset &dataset,
+//     const std::vector<size_t>& col_indices
+// ) {
+//     std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> partitions;
+//
+//     // Reuse key vector
+//     std::vector<int32_t> key;
+//     key.reserve(col_indices.size());
+//
+//     for (auto &row: dataset) {
+//         key.clear();
+//         for (size_t idx: col_indices) {
+//             key.push_back(get_int32(row[idx]));
+//         }
+//         partitions[key].emplace_back(std::move(row));
+//     }
+//
+//     return partitions;
+// }
+//
+// // Specialized version for single column
+// std::unordered_map<int32_t, Dataset>
+// partition_dataset_single_impl(
+//     Dataset &dataset,
+//     size_t col_index
+// ) {
+//     std::unordered_map<int32_t, Dataset> partitions;
+//
+//     for (auto &row: dataset) {
+//         int32_t key = get_int32(row[col_index]);
+//         partitions[key].emplace_back(std::move(row));
+//     }
+//
+//     return partitions;
+// }
+//
+// // Main dispatch function
+// using PartitionResult = std::variant<
+//     std::unordered_map<int32_t, Dataset>,
+//     std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>
+// >;
+//
+// PartitionResult partition_dataset_main(
+//     Dataset &dataset,
+//     const FileSchema &schema,
+//     const std::vector<std::string> &partition_columns
+// ) {
+//     if (partition_columns.empty()) {
+//         std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> result;
+//         result[{}] = std::move(dataset);
+//         return result;
+//     }
+//
+//     // Precompute column indices
+//     std::vector<size_t> col_indices;
+//     col_indices.reserve(partition_columns.size());
+//     for (const auto &col: partition_columns) {
+//         col_indices.push_back(schema.index_of(col));
+//     }
+//
+//     // Dispatch to specialized implementation
+//     if (partition_columns.size() == 1) {
+//         return partition_dataset_single_impl(dataset, col_indices[0]);
+//     } else {
+//         return partition_dataset_impl(dataset, col_indices);
+//     }
+// }
+
+#include <atomic>
+
+PartitionResult partition_dataset_morsel(
+    Dataset &dataset,
+    const FileSchema &schema,
+    const std::vector<std::string> &partition_columns,
+    size_t num_threads = std::thread::hardware_concurrency(),
+    size_t morsel_size = 4096
+) {
+    if (partition_columns.empty()) {
+        std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> result;
+        result[{}] = std::move(dataset);
+        return result;
+    }
+
+    // Precompute indices
+    std::vector<size_t> col_indices;
+    col_indices.reserve(partition_columns.size());
+    for (const auto &col : partition_columns) {
+        col_indices.push_back(schema.index_of(col));
+    }
+
+    size_t n = dataset.size();
+    std::atomic<size_t> next_morsel(0);
+
+    if (partition_columns.size() == 1) {
+        std::vector<std::unordered_map<int32_t, Dataset>> thread_partitions(num_threads);
+
+        auto worker = [&](size_t tid) {
+            auto &local = thread_partitions[tid];
+            while (true) {
+                size_t start = next_morsel.fetch_add(morsel_size);
+                if (start >= n) break;
+                size_t end = std::min(start + morsel_size, n);
+
+                for (size_t i = start; i < end; ++i) {
+                    int32_t key = get_int32(dataset[i][col_indices[0]]);
+                    local[key].emplace_back(std::move(dataset[i]));
+                }
+            }
+        };
+
+        // Launch threads
+        std::vector<std::thread> threads;
+        for (size_t t = 0; t < num_threads; ++t) {
+            threads.emplace_back(worker, t);
+        }
+        for (auto &th : threads) th.join();
+
+        // Merge
+        std::unordered_map<int32_t, Dataset> global;
+        for (auto &tp : thread_partitions) {
+            for (auto &kv : tp) {
+                auto &vec = global[kv.first];
+                std::move(kv.second.begin(), kv.second.end(), std::back_inserter(vec));
+            }
+        }
+        dataset.clear();
+        return global;
+
+    } else {
+        std::vector<std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>> thread_partitions(num_threads);
+
+        auto worker = [&](size_t tid) {
+            auto &local = thread_partitions[tid];
+            std::vector<int32_t> key;
+            key.reserve(col_indices.size());
+
+            while (true) {
+                size_t start = next_morsel.fetch_add(morsel_size);
+                if (start >= n) break;
+                size_t end = std::min(start + morsel_size, n);
+
+                for (size_t i = start; i < end; ++i) {
+                    key.clear();
+                    for (size_t idx : col_indices) {
+                        key.push_back(get_int32(dataset[i][idx]));
+                    }
+                    local[key].emplace_back(std::move(dataset[i]));
+                }
+            }
+        };
+
+        std::vector<std::thread> threads;
+        for (size_t t = 0; t < num_threads; ++t) {
+            threads.emplace_back(worker, t);
+        }
+        for (auto &th : threads) th.join();
+
+        // Merge
+        std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> global;
+        for (auto &tp : thread_partitions) {
+            for (auto &kv : tp) {
+                auto &vec = global[kv.first];
+                std::move(kv.second.begin(), kv.second.end(), std::back_inserter(vec));
+            }
+        }
+        dataset.clear();
+        return global;
+    }
+}
+
+
+#include <variant>
+
+
+
+// Thread-local integer key partition map
+using IntPartitionMap = std::unordered_map<int32_t, Dataset>;
+// Thread-local multi-column key partition map
+using VecPartitionMap = std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>;
+
+using PartitionResult2 = std::variant<
+    std::vector<IntPartitionMap>,
+    std::vector<VecPartitionMap>
+>;
+
+// Unified morsel-driven parallel partitioning
+PartitionResult2 partition_dataset_parallel_mergefree(
+    Dataset &dataset,
+    const FileSchema &schema,
+    const std::vector<std::string> &partition_columns,
+    size_t num_threads = std::thread::hardware_concurrency(),
+    size_t morsel_size = 2048
+) {
+    size_t n = dataset.size();
+    if (partition_columns.empty()) {
+        VecPartitionMap result;
+        result[{}] = std::move(dataset);
+        return std::vector<VecPartitionMap>{result};
+    }
+
+    // Precompute column indices
+    std::vector<size_t> col_indices;
+    col_indices.reserve(partition_columns.size());
+    for (const auto &col : partition_columns) {
+        col_indices.push_back(schema.index_of(col));
+    }
+
+    std::atomic<size_t> next_morsel(0);
+
+    if (partition_columns.size() == 1) {
+        // Thread-local storage
+        std::vector<IntPartitionMap> thread_partitions(num_threads);
+
+        auto worker = [&](size_t tid) {
+            auto &local = thread_partitions[tid];
+            size_t col_idx = col_indices[0];
+
+            while (true) {
+                size_t start = next_morsel.fetch_add(morsel_size);
+                if (start >= n) break;
+                size_t end = std::min(start + morsel_size, n);
+
+                // Pre-reserve space for vectors if possible
+                for (size_t i = start; i < end; ++i) {
+                    int32_t key = get_int32(dataset[i][col_idx]);
+                    auto &vec = local[key];
+                    vec.reserve(vec.size() + 1); // optional, helps reduce reallocations
+                    vec.emplace_back(std::move(dataset[i]));
+                }
+            }
+        };
+
+        // Launch threads
+        std::vector<std::thread> threads;
+        for (size_t t = 0; t < num_threads; ++t)
+            threads.emplace_back(worker, t);
+        for (auto &th : threads) th.join();
+
+        dataset.clear();
+        return thread_partitions; // return thread-local maps directly
+    } else {
+        // Multi-column keys
+        std::vector<VecPartitionMap> thread_partitions(num_threads);
+
+        auto worker = [&](size_t tid) {
+            auto &local = thread_partitions[tid];
+            std::vector<int32_t> key;
+            key.reserve(col_indices.size());
+
+            while (true) {
+                size_t start = next_morsel.fetch_add(morsel_size);
+                if (start >= n) break;
+                size_t end = std::min(start + morsel_size, n);
+
+                for (size_t i = start; i < end; ++i) {
+                    key.clear();
+                    for (size_t idx : col_indices)
+                        key.push_back(get_int32(dataset[i][idx]));
+                    auto &vec = local[key];
+                    vec.reserve(vec.size() + 1);
+                    vec.emplace_back(std::move(dataset[i]));
+                }
+            }
+        };
+
+        std::vector<std::thread> threads;
+        for (size_t t = 0; t < num_threads; ++t)
+            threads.emplace_back(worker, t);
+        for (auto &th : threads) th.join();
+
+        dataset.clear();
+        return thread_partitions; // return thread-local maps directly
+    }
+}
+
 
 int main() {
-    // Create a vector with 10 million elements (1e7 is 10 million, 1e6 is 1 million) and fill it with random integers
-    const int size = 1e5;
-    std::vector<size_t> data(size);
-    std::generate(data.begin(), data.end(), std::rand);
+    cout << "START PROCESSING:" << endl;
 
-    // Divide every element by size to reduce the range of values for counting sort
-    // for (auto& num : data) {
-    //     num = num % (size/10); // Reduce range to 0-999 for counting sort
+    auto [input, input_schema] = read_csv_optimized("first_test/input3.csv");
+
+    // Create a vector with one element called "category"
+    std::vector<std::string> partition_columns = {"category"};
+
+    // Time the partitioning
+    auto startSecondPartitioning = std::chrono::high_resolution_clock::now();
+
+    auto input_partitions_sequential2 = partition_dataset(input, input_schema, partition_columns);
+
+    auto endSecondPartitioning = std::chrono::high_resolution_clock::now();
+    auto durationSecondPartitioning = std::chrono::duration_cast<std::chrono::milliseconds>(
+        endSecondPartitioning - startSecondPartitioning);
+    std::cout << "Time taken to partition the input sequentially: " << durationSecondPartitioning.count() <<
+            " milliseconds" << std::endl;
+
+    auto [input2, input_schema2] = read_csv_optimized("first_test/input3.csv");
+
+    // Time the parallel partitioning
+    auto startParallelPartitioning = std::chrono::high_resolution_clock::now();
+
+    auto input_partitions_parallel = partition_dataset_parallel(input2, input_schema2, partition_columns);
+
+    auto endParallelPartitioning = std::chrono::high_resolution_clock::now();
+    auto durationParallelPartitioning = std::chrono::duration_cast<std::chrono::milliseconds>(
+        endParallelPartitioning - startParallelPartitioning);
+    std::cout << "Time taken to partition the input in parallel: " << durationParallelPartitioning.count() <<
+            " milliseconds" << std::endl;
+
+
+    auto [input3, input_schema3] = read_csv_optimized("first_test/input3.csv");
+
+    // Time the parallel partitioning
+    auto startParallelPartitioningMorsel = std::chrono::high_resolution_clock::now();
+
+    auto input_partitions_parallel_morsel = partition_dataset_parallel(input3, input_schema3, partition_columns);
+
+    auto endParallelPartitioningMorsel = std::chrono::high_resolution_clock::now();
+    auto durationParallelPartitioningMorsel = std::chrono::duration_cast<std::chrono::milliseconds>(
+        endParallelPartitioningMorsel - startParallelPartitioningMorsel);
+    std::cout << "Time taken to partition the input in parallel morsel: " << durationParallelPartitioningMorsel.count() <<
+            " milliseconds" << std::endl;
+
+
+    auto [input4, input_schema4] = read_csv_optimized("first_test/input3.csv");
+
+    // Time the parallel partitioning
+    auto startParallelPartitioningMorselMergeFree = std::chrono::high_resolution_clock::now();
+
+    auto input_partitions_parallel_morselMergeFree = partition_dataset_parallel_mergefree(input4, input_schema4, partition_columns);
+
+    auto endParallelPartitioningMorselMergeFree = std::chrono::high_resolution_clock::now();
+    auto durationParallelPartitioningMorselMergeFree = std::chrono::duration_cast<std::chrono::milliseconds>(
+        endParallelPartitioningMorselMergeFree - startParallelPartitioningMorselMergeFree);
+    std::cout << "Time taken to partition the input in parallel morsel: " << durationParallelPartitioningMorselMergeFree.count() <<
+            " milliseconds" << std::endl;
+
+
+    // Compare the outputs
+    // std::cout << "\nStarting comparison..." << std::endl;
+    // if (compare_partition_outputs(input_partitions_sequential2, input_partitions_parallel)) {
+    //     std::cout << "The two partitioning functions returned the same data. Test passed! ✅" << std::endl;
+    // } else {
+    //     std::cout << "The two partitioning functions returned different data. Test failed! ❌" << std::endl;
     // }
-
-    // Time the sorting
-    auto start = std::chrono::high_resolution_clock::now();
-
-    // Sort the vector
-    // basic_sort(data);
-    // qsort(data);
-    // stable_sort(data);
-    // radix_sort(data);
-    // counting_sort(data);
-    // ips2ra_sort(data);
-    ips2ra_parallel_sort(data);
-    // ips4o_sort(data);
-    // ips4o_parallel_sort(data);
-
-    // Stop the timer
-    auto end = std::chrono::high_resolution_clock::now();
-
-    // Calculate the duration in milliseconds
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-    // Print the result
-    std::cout << "Time taken to sort " << size << " integers: " << duration.count() << " milliseconds" << std::endl;
 
     return 0;
 }

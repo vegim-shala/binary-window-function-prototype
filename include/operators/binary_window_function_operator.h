@@ -24,7 +24,7 @@ public:
           join_utils(this->spec.join_spec, this->spec.order_column) {
     }
 
-    std::pair<Dataset, FileSchema> execute(const Dataset& input, const Dataset& probe, FileSchema schema);
+    std::pair<Dataset, FileSchema> execute(Dataset& input, Dataset& probe, FileSchema input_schema, FileSchema probe_schema);
 
 private:
     BinaryWindowFunctionModel spec;
