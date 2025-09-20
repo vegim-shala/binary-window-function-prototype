@@ -14,8 +14,8 @@ using namespace std;
 int main() {
     cout << "START PROCESSING:" << endl;
 
-    auto [input, input_schema] = read_csv_optimized("small_partitions/input4.csv");
-    auto [probe, probe_schema] = read_csv_optimized("small_partitions/probe4.csv");
+    auto [input, input_schema] = read_csv_optimized("official_duckdb_test/input3.csv");
+    auto [probe, probe_schema] = read_csv_optimized("official_duckdb_test/probe3.csv");
     // verify_binary_file("dynamic_columns.bin");
     // auto [data, schema] = read_binary("sensor.bin");
 
