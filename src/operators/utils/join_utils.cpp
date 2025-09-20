@@ -41,6 +41,8 @@ void JoinUtils::pretty_print_segment_tree() const {
 }
 
 void JoinUtils::build_index(const Dataset& input, const FileSchema &schema, std::string& value_column) {
+    // auto start = std::chrono::high_resolution_clock::now();
+
     n = input.size();
     keys.resize(n);
     std::vector<double> values(n);
@@ -62,6 +64,10 @@ void JoinUtils::build_index(const Dataset& input, const FileSchema &schema, std:
     for (size_t i = n - 1; i > 0; --i) {
         segtree[i] = segtree[i << 1] + segtree[i << 1 | 1];
     }
+
+    // auto end = std::chrono::high_resolution_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    // std::cout << "Time taken for BUILD_INDEX: " << duration.count() << " ms" << std::endl;
 
     // pretty_print_segment_tree();
 

@@ -531,7 +531,7 @@ PartitionResult2 partition_dataset_parallel_mergefree(
 int main() {
     cout << "START PROCESSING:" << endl;
 
-    auto [input, input_schema] = read_csv_optimized("first_test/input3.csv");
+    auto [input, input_schema] = read_csv_optimized("official_duckdb_test/input3.csv");
 
     // Create a vector with one element called "category"
     std::vector<std::string> partition_columns = {"category"};
@@ -547,7 +547,7 @@ int main() {
     std::cout << "Time taken to partition the input sequentially: " << durationSecondPartitioning.count() <<
             " milliseconds" << std::endl;
 
-    auto [input2, input_schema2] = read_csv_optimized("first_test/input3.csv");
+    auto [input2, input_schema2] = read_csv_optimized("official_duckdb_test/input3.csv");
 
     // Time the parallel partitioning
     auto startParallelPartitioning = std::chrono::high_resolution_clock::now();
@@ -561,7 +561,7 @@ int main() {
             " milliseconds" << std::endl;
 
 
-    auto [input3, input_schema3] = read_csv_optimized("first_test/input3.csv");
+    auto [input3, input_schema3] = read_csv_optimized("official_duckdb_test/input3.csv");
 
     // Time the parallel partitioning
     auto startParallelPartitioningMorsel = std::chrono::high_resolution_clock::now();
@@ -575,7 +575,7 @@ int main() {
             " milliseconds" << std::endl;
 
 
-    auto [input4, input_schema4] = read_csv_optimized("first_test/input3.csv");
+    auto [input4, input_schema4] = read_csv_optimized("official_duckdb_test/input3.csv");
 
     // Time the parallel partitioning
     auto startParallelPartitioningMorselMergeFree = std::chrono::high_resolution_clock::now();

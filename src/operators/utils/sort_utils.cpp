@@ -3,10 +3,15 @@
 //
 #include "operators/utils/sort_utils.h"
 
+
 #include <iostream>
 
 #include "ips2ra.hpp"
 #include "ips4o/ips4o.hpp"
+
+
+
+
 
 // Helper function for Radix Sort
 void counting_sort_by_digit(std::vector<DataRow> &data, std::vector<int> &keys, int exp) {
@@ -127,13 +132,20 @@ void ips2ra_sort(Dataset &data, const FileSchema &schema,  const std::string &or
  * @param data
  * @param order_column
  */
-void ips2ra_parallel_sort(Dataset &data, const FileSchema &schema, const std::string &order_column) {
-  	size_t order_idx  = schema.index_of(order_column);
-    ips2ra::parallel::sort(data.begin(), data.end(),
-                           [&](const DataRow &row) {
-                               return static_cast<size_t>(extract_numeric(row[order_idx]));
-                           });
-};
+void ips2ra_parallel_sort(Dataset &data, const FileSchema &schema, const std::string &order_column, size_t threads) {
+    size_t order_idx  = schema.index_of(order_column);
+    if (threads == 0) {
+        ips2ra::parallel::sort(data.begin(), data.end(),
+            [&](const DataRow &row) {
+                return static_cast<size_t>(extract_numeric(row[order_idx]));
+            });
+    } else {
+        ips2ra::parallel::sort(data.begin(), data.end(),
+            [&](const DataRow &row) {
+                return static_cast<size_t>(extract_numeric(row[order_idx]));
+            }, threads);
+    }
+}
 
 // ---------------------------    IPS4O SORT    -------------------------------
 
@@ -169,13 +181,12 @@ void ips4o_parallel_sort(Dataset &data, const FileSchema &schema, const std::str
 };
 
 
-void SortUtils::sort_dataset(Dataset &data, const FileSchema &schema, const std::string &order_column) {
+void SortUtils::sort_dataset(Dataset &data, const FileSchema &schema, const std::string &order_column, size_t parallel_threads) {
     // auto start = std::chrono::high_resolution_clock::now();
 
-    ips2ra_parallel_sort(data, schema, order_column);
+    ips2ra_parallel_sort(data, schema, order_column, parallel_threads);
 
     // auto end = std::chrono::high_resolution_clock::now();
     // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     // std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
-
 }

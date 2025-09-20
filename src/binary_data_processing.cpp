@@ -14,8 +14,8 @@ using namespace std;
 int main() {
     cout << "START PROCESSING:" << endl;
 
-    auto [input, input_schema] = read_csv_optimized("first_test/input4.csv");
-    auto [probe, probe_schema] = read_csv_optimized("first_test/probe4.csv");
+    auto [input, input_schema] = read_csv_optimized("small_partitions/input4.csv");
+    auto [probe, probe_schema] = read_csv_optimized("small_partitions/probe4.csv");
     // verify_binary_file("dynamic_columns.bin");
     // auto [data, schema] = read_binary("sensor.bin");
 
@@ -51,7 +51,7 @@ int main() {
     print_dataset(result, new_schema, 100);
 
     cout << "Output: " << endl;
-    write_csv("first_test/output3.csv", result, new_schema);
+    write_csv("small_partitions/output.csv", result, new_schema);
 
     return 0;
 }
