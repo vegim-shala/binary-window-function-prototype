@@ -34,8 +34,7 @@ add_executable(binary_prototype_csv src/binary_data_processing.cpp
         ${COMMON_SOURCES})
 add_executable(sorting_tester src/sorting_tester.cpp
         ${COMMON_SOURCES})
-add_executable(partitioning_tester src/partitioning_tester.cpp
-        ${COMMON_SOURCES})
+add_executable(partitioning_tester src/partitioning_tester.cpp src/operators/utils/partition_utils.cpp include/operators/utils/partition_utils.h src/data_io.cpp include/data_io.h)
 add_executable(benchmark_test src/benchmark_bwf.cpp
         ${COMMON_SOURCES})
 

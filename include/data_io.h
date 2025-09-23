@@ -12,8 +12,8 @@
 #include <variant>
 #include <filesystem>
 
-using ColumnValue = std::variant<int, double, std::string>;
-using DataRow = std::vector<ColumnValue>;
+using ColumnValue = int32_t;
+using DataRow = std::vector<int32_t>;
 using Dataset = std::vector<DataRow>;
 
 struct FileSchema {

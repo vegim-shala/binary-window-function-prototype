@@ -23,9 +23,14 @@ public:
         std::cout << "=== Binary Window Function Benchmark Suite ===\n\n";
 
         // Test different scenarios
-        // test_large_partitions();
-        test_many_small_partitions();
-        // test_mixed_scenarios();
+        // test_few_large_partitions(); // A1
+        // test_many_small_partitions(); // A2
+        // test_equal_partitions_and_rows(); // A3
+        // test_less_partitions_in_probe(); // B1
+        // test_less_partitions_in_input(); // B2
+        // test_one_row_probe(); // C1
+        test_A1_bigger_ranges(); // D1
+        // test_A1_very_small_ranges(); // D2
 
         std::cout << "\n=== Benchmark Complete ===\n";
     }
@@ -49,8 +54,9 @@ private:
         return model;
     }
 
-    void test_large_partitions() {
-        std::cout << "1. Scenario: Few Large Partitions\n";
+    void test_few_large_partitions() {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "A1. Scenario: Few Large Partitions\n";
 
         std::vector<std::pair<std::string, std::string>> files = {
             {"official_duckdb_test/input1.csv", "official_duckdb_test/probe1.csv"},
@@ -71,10 +77,12 @@ private:
             auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
         }
+        std::cout << "---------------------------------------------------------------------------------\n";
     }
 
     void test_many_small_partitions() {
-        std::cout << "2. Scenario: Many Small Partitions\n";
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "A2. Scenario: Many Small Partitions\n";
 
         std::vector<std::pair<std::string, std::string>> files = {
             {"small_partitions/input1.csv", "small_partitions/probe1.csv"},
@@ -95,6 +103,163 @@ private:
             auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
         }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void test_equal_partitions_and_rows() {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "A3. Scenario: Number of partitions and rows per partitions is equal\n";
+
+        std::vector<std::pair<std::string, std::string>> files = {
+            {"A3/input1.csv", "A3/probe1.csv"}, // 100 x 100
+            {"A3/input2.csv", "A3/probe2.csv"}, // 320 x 320
+            {"A3/input3.csv", "A3/probe3.csv"}, // 1000 x 1000
+            {"A3/input4.csv", "A3/probe4.csv"} // 3200 x 3200
+        };
+
+        for(int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_optimized(files[i].first);
+            auto [probe, probe_schema] = read_csv_optimized(files[i].second);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionOperator op(model);
+
+            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void test_less_partitions_in_probe() {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "B1. Scenario: Probe has fewer partitions than Input (same partition sizes)\n";
+
+        std::vector<std::pair<std::string, std::string>> files = {
+            {"B1/input1.csv", "B1/probe1.csv"}, // 100x100 vs 10x100
+            {"B1/input2.csv", "B1/probe2.csv"}, // 320x320 vs 32x320
+            {"B1/input3.csv", "B1/probe3.csv"}, // 1000x1000 vs 100x1000
+            {"B1/input4.csv", "B1/probe4.csv"} // 3200x3200 vs 320x3200
+        };
+
+        for(int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_optimized(files[i].first);
+            auto [probe, probe_schema] = read_csv_optimized(files[i].second);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionOperator op(model);
+
+            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void test_less_partitions_in_input() {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "B2. Scenario: Input has fewer partitions than Probe (same partition sizes)\n";
+
+        std::vector<std::pair<std::string, std::string>> files = {
+            {"B2/input1.csv", "B2/probe1.csv"}, // 10x100 vs 100x100
+            {"B2/input2.csv", "B2/probe2.csv"}, // 32x320 vs 320x320
+            {"B2/input3.csv", "B2/probe3.csv"}, // 100x1000 vs 1000x1000
+            {"B2/input4.csv", "B2/probe4.csv"}  // 320x3200 vs 3200x3200
+        };
+
+        for(int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_optimized(files[i].first);
+            auto [probe, probe_schema] = read_csv_optimized(files[i].second);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionOperator op(model);
+
+            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void test_one_row_probe() {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "C1. Scenario: Probe has only one row (checks for sensor/system logs)\n";
+
+        std::vector<std::pair<std::string, std::string>> files = {
+            {"C1/input1.csv", "C1/probe1.csv"}, // 100x100
+            {"C1/input2.csv", "C1/probe2.csv"}, //b320x320
+            {"C1/input3.csv", "C1/probe3.csv"}, // 1000x1000
+            {"C1/input4.csv", "C1/probe4.csv"} // 3200x3200
+        };
+
+        for(int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_optimized(files[i].first);
+            auto [probe, probe_schema] = read_csv_optimized(files[i].second);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionOperator op(model);
+
+            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void test_A1_bigger_ranges() {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "D1. Scenario: Testing for bigger ranges (same config as in A1))\n";
+
+        std::vector<std::pair<std::string, std::string>> files = {
+            {"D1/input1.csv", "D1/probe1.csv"}, // 10x1000, Window Size: 800
+            {"D1/input2.csv", "D1/probe2.csv"}, // 10x10000, Window Size: 8000
+            {"D1/input3.csv", "D1/probe3.csv"}, // 100x10000, Window Size: 8000
+            {"D1/input4.csv", "D1/probe4.csv"} // 100x100000, Window Size: 80000
+        };
+
+        for(int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_optimized(files[i].first);
+            auto [probe, probe_schema] = read_csv_optimized(files[i].second);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionOperator op(model);
+
+            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void test_A1_very_small_ranges() {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "D2. Scenario: Testing for tiny ranges (allowing for duplicates in probe))\n";
+
+        std::vector<std::pair<std::string, std::string>> files = {
+            {"D2/input1.csv", "D2/probe1.csv"}, // 10x1000, Window Size: 1-3
+            {"D2/input2.csv", "D2/probe2.csv"}, // 10x10000, Window Size: 10-12
+            {"D2/input3.csv", "D2/probe3.csv"}, // 100x10000, Window Size: 10-12
+            {"D2/input4.csv", "D2/probe4.csv"} // 100x100000, Window Size: 10-12
+        };
+
+        for(int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_optimized(files[i].first);
+            auto [probe, probe_schema] = read_csv_optimized(files[i].second);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionOperator op(model);
+
+            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
     }
 
     void test_mixed_scenarios() {

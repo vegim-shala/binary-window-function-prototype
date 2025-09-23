@@ -25,6 +25,9 @@ public:
     }
 
     std::pair<Dataset, FileSchema> execute(Dataset& input, Dataset& probe, FileSchema input_schema, FileSchema probe_schema);
+    std::pair<Dataset, FileSchema> execute2(Dataset& input, Dataset& probe, FileSchema input_schema, FileSchema probe_schema);
+    std::pair<Dataset, FileSchema> execute3(Dataset& input, Dataset& probe, FileSchema input_schema, FileSchema probe_schema);
+    std::pair<Dataset, FileSchema> execute4(Dataset& input, Dataset& probe, FileSchema input_schema, FileSchema probe_schema);
 
 private:
     BinaryWindowFunctionModel spec;

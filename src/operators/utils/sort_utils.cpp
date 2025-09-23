@@ -56,7 +56,7 @@ void radix_sort_rows(std::vector<DataRow> &data, const FileSchema &schema, std::
     size_t order_idx  = schema.index_of(order_column);
 
     for (const auto &row: data) {
-        keys.push_back(extract_numeric(row[order_idx]));
+        keys.push_back(row[order_idx]);
     }
     int max_key = *std::max_element(keys.begin(), keys.end());
 
@@ -74,7 +74,7 @@ void counting_sort_rows(std::vector<DataRow> &data, const FileSchema &schema, st
     size_t order_idx  = schema.index_of(order_column);
 
     for (const auto &row: data) {
-        keys.push_back(extract_numeric(row[order_idx]));
+        keys.push_back(row[order_idx]);
     }
 
     // 2. Find the min and max key to determine the range
@@ -121,7 +121,7 @@ void ips2ra_sort(Dataset &data, const FileSchema &schema,  const std::string &or
   	size_t order_idx  = schema.index_of(order_column);
     ips2ra::sort(data.begin(), data.end(),
                            [&](const DataRow &row) {
-                               return static_cast<size_t>(extract_numeric(row[order_idx]));
+                               return static_cast<size_t>(row[order_idx]);
                            });
 };
 
@@ -137,12 +137,12 @@ void ips2ra_parallel_sort(Dataset &data, const FileSchema &schema, const std::st
     if (threads == 0) {
         ips2ra::parallel::sort(data.begin(), data.end(),
             [&](const DataRow &row) {
-                return static_cast<size_t>(extract_numeric(row[order_idx]));
+                return static_cast<size_t>(row[order_idx]);
             });
     } else {
         ips2ra::parallel::sort(data.begin(), data.end(),
             [&](const DataRow &row) {
-                return static_cast<size_t>(extract_numeric(row[order_idx]));
+                return static_cast<size_t>(row[order_idx]);
             }, threads);
     }
 }
@@ -158,7 +158,7 @@ void ips4o_sort(Dataset &data, const FileSchema &schema, const std::string &orde
   	size_t order_idx  = schema.index_of(order_column);
     ips4o::sort(data.begin(), data.end(),
                 [&](const DataRow &a, const DataRow &b) {
-                    return extract_numeric(a[order_idx]) < extract_numeric(b[order_idx]);
+                    return a[order_idx] < b[order_idx];
                 });
 };
 
@@ -175,7 +175,7 @@ void ips4o_parallel_sort(Dataset &data, const FileSchema &schema, const std::str
         data.begin(),
         data.end(),
         [&](const DataRow &a, const DataRow &b) {
-            return extract_numeric(a[order_idx]) < extract_numeric(b[order_idx]);
+            return a[order_idx] < b[order_idx];
         }
     );
 };

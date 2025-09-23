@@ -99,4 +99,47 @@ namespace PartitionUtils {
         size_t num_threads = std::thread::hardware_concurrency(),
         size_t morsel_size = 2048
     );
+
+    using IndexDataset = std::vector<size_t>; // indices into the original Dataset
+
+    using PartitionIndexResult = std::variant<
+        std::unordered_map<int32_t, IndexDataset>,
+        std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq>
+    >;
+
+    // New function: partition but return indices (no row copies)
+    PartitionIndexResult partition_dataset_index_morsel(
+        const Dataset &dataset,
+        const FileSchema &schema,
+        const std::vector<std::string> &partition_columns,
+        size_t num_threads = std::thread::hardware_concurrency(),
+        size_t morsel_size = 2048
+    );
+
+    using RadixPartitionResult = std::vector<IndexDataset>;
+
+    RadixPartitionResult partition_dataset_radix(
+        const Dataset &dataset,
+        const FileSchema &schema,
+        const std::vector<std::string> &partition_columns,
+        size_t num_threads,
+        size_t radix_bits = 8 // 256 buckets by default
+    );
+
+    RadixPartitionResult partition_dataset_radix_advanced(
+        const Dataset &dataset,
+        const FileSchema &schema,
+        const std::vector<std::string> &partition_columns,
+        size_t num_threads,
+        size_t radix_bits_per_pass = 6 // 64 buckets per pass
+    );
+
+    RadixPartitionResult partition_dataset_radix_morsel(
+        const Dataset &dataset,
+        const FileSchema &schema,
+        const std::vector<std::string> &partition_columns,
+        size_t num_threads,
+        size_t radix_bits = 8, // 256 buckets
+        size_t morsel_size = 2048 // 4KB morsels
+    );
 }

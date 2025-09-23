@@ -7,6 +7,9 @@
 #include <mutex>
 #include <unordered_map>
 #include <string>
+#include <operators/utils/partition_utils.h>
+#include <numeric>
+#include <atomic>
 
 using namespace std;
 
@@ -15,20 +18,20 @@ using namespace std;
 #include <omp.h>
 
 // Safe integer extractor
-inline int32_t get_int32(const ColumnValue &val) {
-    return std::visit([](auto &&v) -> int32_t {
-        using T = std::decay_t<decltype(v)>;
-        if constexpr (std::is_same_v<T, int>) {
-            return v;
-        } else if constexpr (std::is_same_v<T, double>) {
-            return static_cast<int32_t>(v);
-        } else if constexpr (std::is_same_v<T, std::string>) {
-            return std::stoi(v); // fallback (slow) – avoid if possible
-        } else {
-            throw std::runtime_error("Unsupported type in get_int32");
-        }
-    }, val);
-}
+// inline int32_t get_int32(const ColumnValue &val) {
+//     return std::visit([](auto &&v) -> int32_t {
+//         using T = std::decay_t<decltype(v)>;
+//         if constexpr (std::is_same_v<T, int>) {
+//             return v;
+//         } else if constexpr (std::is_same_v<T, double>) {
+//             return static_cast<int32_t>(v);
+//         } else if constexpr (std::is_same_v<T, std::string>) {
+//             return std::stoi(v); // fallback (slow) – avoid if possible
+//         } else {
+//             throw std::runtime_error("Unsupported type in get_int32");
+//         }
+//     }, val);
+// }
 
 // Custom hash for vector<int64_t>
 struct VecHash {
@@ -77,8 +80,7 @@ PartitionResult partition_dataset(
         std::unordered_map<int32_t, Dataset> partitions;
         size_t col_idx = col_indices[0];
         for (auto &row : dataset) {
-            int32_t key = get_int32(row[col_idx]);
-            partitions[key].emplace_back(std::move(row));
+            partitions[row[col_idx]].emplace_back(std::move(row));
         }
         dataset.clear();
         return partitions;
@@ -91,7 +93,7 @@ PartitionResult partition_dataset(
     for (auto &row : dataset) {
         key.clear();
         for (size_t idx : col_indices) {
-            key.push_back(get_int32(row[idx]));
+            key.push_back(row[idx]);
         }
         partitions[key].emplace_back(std::move(row));
     }
@@ -135,8 +137,7 @@ PartitionResult partition_dataset_parallel(
             size_t end = std::min(start + chunk_size, n);
 
             for (size_t i = start; i < end; ++i) {
-                int32_t key = get_int32(dataset[i][col_indices[0]]);
-                local[key].emplace_back(std::move(dataset[i]));
+                local[dataset[i][col_indices[0]]].emplace_back(std::move(dataset[i]));
             }
         }
 
@@ -167,7 +168,7 @@ PartitionResult partition_dataset_parallel(
             for (size_t i = start; i < end; ++i) {
                 key.clear();
                 for (size_t idx : col_indices) {
-                    key.push_back(get_int32(dataset[i][idx]));
+                    key.push_back(dataset[i][idx]);
                 }
                 local[key].emplace_back(std::move(dataset[i]));
             }
@@ -320,212 +321,6 @@ bool compare_partition_outputs(
 //     }
 // }
 
-#include <atomic>
-
-PartitionResult partition_dataset_morsel(
-    Dataset &dataset,
-    const FileSchema &schema,
-    const std::vector<std::string> &partition_columns,
-    size_t num_threads = std::thread::hardware_concurrency(),
-    size_t morsel_size = 4096
-) {
-    if (partition_columns.empty()) {
-        std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> result;
-        result[{}] = std::move(dataset);
-        return result;
-    }
-
-    // Precompute indices
-    std::vector<size_t> col_indices;
-    col_indices.reserve(partition_columns.size());
-    for (const auto &col : partition_columns) {
-        col_indices.push_back(schema.index_of(col));
-    }
-
-    size_t n = dataset.size();
-    std::atomic<size_t> next_morsel(0);
-
-    if (partition_columns.size() == 1) {
-        std::vector<std::unordered_map<int32_t, Dataset>> thread_partitions(num_threads);
-
-        auto worker = [&](size_t tid) {
-            auto &local = thread_partitions[tid];
-            while (true) {
-                size_t start = next_morsel.fetch_add(morsel_size);
-                if (start >= n) break;
-                size_t end = std::min(start + morsel_size, n);
-
-                for (size_t i = start; i < end; ++i) {
-                    int32_t key = get_int32(dataset[i][col_indices[0]]);
-                    local[key].emplace_back(std::move(dataset[i]));
-                }
-            }
-        };
-
-        // Launch threads
-        std::vector<std::thread> threads;
-        for (size_t t = 0; t < num_threads; ++t) {
-            threads.emplace_back(worker, t);
-        }
-        for (auto &th : threads) th.join();
-
-        // Merge
-        std::unordered_map<int32_t, Dataset> global;
-        for (auto &tp : thread_partitions) {
-            for (auto &kv : tp) {
-                auto &vec = global[kv.first];
-                std::move(kv.second.begin(), kv.second.end(), std::back_inserter(vec));
-            }
-        }
-        dataset.clear();
-        return global;
-
-    } else {
-        std::vector<std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>> thread_partitions(num_threads);
-
-        auto worker = [&](size_t tid) {
-            auto &local = thread_partitions[tid];
-            std::vector<int32_t> key;
-            key.reserve(col_indices.size());
-
-            while (true) {
-                size_t start = next_morsel.fetch_add(morsel_size);
-                if (start >= n) break;
-                size_t end = std::min(start + morsel_size, n);
-
-                for (size_t i = start; i < end; ++i) {
-                    key.clear();
-                    for (size_t idx : col_indices) {
-                        key.push_back(get_int32(dataset[i][idx]));
-                    }
-                    local[key].emplace_back(std::move(dataset[i]));
-                }
-            }
-        };
-
-        std::vector<std::thread> threads;
-        for (size_t t = 0; t < num_threads; ++t) {
-            threads.emplace_back(worker, t);
-        }
-        for (auto &th : threads) th.join();
-
-        // Merge
-        std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> global;
-        for (auto &tp : thread_partitions) {
-            for (auto &kv : tp) {
-                auto &vec = global[kv.first];
-                std::move(kv.second.begin(), kv.second.end(), std::back_inserter(vec));
-            }
-        }
-        dataset.clear();
-        return global;
-    }
-}
-
-
-#include <variant>
-
-
-
-// Thread-local integer key partition map
-using IntPartitionMap = std::unordered_map<int32_t, Dataset>;
-// Thread-local multi-column key partition map
-using VecPartitionMap = std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>;
-
-using PartitionResult2 = std::variant<
-    std::vector<IntPartitionMap>,
-    std::vector<VecPartitionMap>
->;
-
-// Unified morsel-driven parallel partitioning
-PartitionResult2 partition_dataset_parallel_mergefree(
-    Dataset &dataset,
-    const FileSchema &schema,
-    const std::vector<std::string> &partition_columns,
-    size_t num_threads = std::thread::hardware_concurrency(),
-    size_t morsel_size = 2048
-) {
-    size_t n = dataset.size();
-    if (partition_columns.empty()) {
-        VecPartitionMap result;
-        result[{}] = std::move(dataset);
-        return std::vector<VecPartitionMap>{result};
-    }
-
-    // Precompute column indices
-    std::vector<size_t> col_indices;
-    col_indices.reserve(partition_columns.size());
-    for (const auto &col : partition_columns) {
-        col_indices.push_back(schema.index_of(col));
-    }
-
-    std::atomic<size_t> next_morsel(0);
-
-    if (partition_columns.size() == 1) {
-        // Thread-local storage
-        std::vector<IntPartitionMap> thread_partitions(num_threads);
-
-        auto worker = [&](size_t tid) {
-            auto &local = thread_partitions[tid];
-            size_t col_idx = col_indices[0];
-
-            while (true) {
-                size_t start = next_morsel.fetch_add(morsel_size);
-                if (start >= n) break;
-                size_t end = std::min(start + morsel_size, n);
-
-                // Pre-reserve space for vectors if possible
-                for (size_t i = start; i < end; ++i) {
-                    int32_t key = get_int32(dataset[i][col_idx]);
-                    auto &vec = local[key];
-                    vec.reserve(vec.size() + 1); // optional, helps reduce reallocations
-                    vec.emplace_back(std::move(dataset[i]));
-                }
-            }
-        };
-
-        // Launch threads
-        std::vector<std::thread> threads;
-        for (size_t t = 0; t < num_threads; ++t)
-            threads.emplace_back(worker, t);
-        for (auto &th : threads) th.join();
-
-        dataset.clear();
-        return thread_partitions; // return thread-local maps directly
-    } else {
-        // Multi-column keys
-        std::vector<VecPartitionMap> thread_partitions(num_threads);
-
-        auto worker = [&](size_t tid) {
-            auto &local = thread_partitions[tid];
-            std::vector<int32_t> key;
-            key.reserve(col_indices.size());
-
-            while (true) {
-                size_t start = next_morsel.fetch_add(morsel_size);
-                if (start >= n) break;
-                size_t end = std::min(start + morsel_size, n);
-
-                for (size_t i = start; i < end; ++i) {
-                    key.clear();
-                    for (size_t idx : col_indices)
-                        key.push_back(get_int32(dataset[i][idx]));
-                    auto &vec = local[key];
-                    vec.reserve(vec.size() + 1);
-                    vec.emplace_back(std::move(dataset[i]));
-                }
-            }
-        };
-
-        std::vector<std::thread> threads;
-        for (size_t t = 0; t < num_threads; ++t)
-            threads.emplace_back(worker, t);
-        for (auto &th : threads) th.join();
-
-        dataset.clear();
-        return thread_partitions; // return thread-local maps directly
-    }
-}
 
 
 int main() {
@@ -552,12 +347,12 @@ int main() {
     // Time the parallel partitioning
     auto startParallelPartitioning = std::chrono::high_resolution_clock::now();
 
-    auto input_partitions_parallel = partition_dataset_parallel(input2, input_schema2, partition_columns);
+    auto input_partitions_parallel = PartitionUtils::partition_dataset_radix_advanced(input2, input_schema2, partition_columns, 8, 16);
 
     auto endParallelPartitioning = std::chrono::high_resolution_clock::now();
     auto durationParallelPartitioning = std::chrono::duration_cast<std::chrono::milliseconds>(
         endParallelPartitioning - startParallelPartitioning);
-    std::cout << "Time taken to partition the input in parallel: " << durationParallelPartitioning.count() <<
+    std::cout << "Time taken to partition the input in parallel radix: " << durationParallelPartitioning.count() <<
             " milliseconds" << std::endl;
 
 
@@ -566,7 +361,7 @@ int main() {
     // Time the parallel partitioning
     auto startParallelPartitioningMorsel = std::chrono::high_resolution_clock::now();
 
-    auto input_partitions_parallel_morsel = partition_dataset_parallel(input3, input_schema3, partition_columns);
+    auto input_partitions_parallel_morsel = PartitionUtils::partition_dataset_index_morsel(input3, input_schema3, partition_columns);
 
     auto endParallelPartitioningMorsel = std::chrono::high_resolution_clock::now();
     auto durationParallelPartitioningMorsel = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -580,12 +375,12 @@ int main() {
     // Time the parallel partitioning
     auto startParallelPartitioningMorselMergeFree = std::chrono::high_resolution_clock::now();
 
-    auto input_partitions_parallel_morselMergeFree = partition_dataset_parallel_mergefree(input4, input_schema4, partition_columns);
+    auto input_partitions_parallel_morsel_radix = PartitionUtils::partition_dataset_radix_morsel(input4, input_schema4, partition_columns, 8, 16, 2048);
 
     auto endParallelPartitioningMorselMergeFree = std::chrono::high_resolution_clock::now();
     auto durationParallelPartitioningMorselMergeFree = std::chrono::duration_cast<std::chrono::milliseconds>(
         endParallelPartitioningMorselMergeFree - startParallelPartitioningMorselMergeFree);
-    std::cout << "Time taken to partition the input in parallel morsel: " << durationParallelPartitioningMorselMergeFree.count() <<
+    std::cout << "Time taken to partition the input in parallel morsel radix: " << durationParallelPartitioningMorselMergeFree.count() <<
             " milliseconds" << std::endl;
 
 

@@ -51,8 +51,8 @@ void JoinUtils::build_index(const Dataset& input, const FileSchema &schema, std:
     size_t value_idx = schema.index_of(value_column);
 
     for (size_t i = 0; i < n; i++) {
-        keys[i] = extract_numeric(input[i][order_idx]);
-        values[i] = extract_numeric(input[i][value_idx]);
+        keys[i] = input[i][order_idx];
+        values[i] = input[i][value_idx];
         // default: sum over value_column, adjust if needed
     }
 
@@ -73,7 +73,14 @@ void JoinUtils::build_index(const Dataset& input, const FileSchema &schema, std:
 
 }
 
-
+void JoinUtils::build_index_from_vectors_segtree(const std::vector<double> &sorted_keys, const std::vector<double> &values) {
+    n = sorted_keys.size();
+    keys = sorted_keys; // copy
+    // values must be same size
+    segtree.assign(2 * n, 0.0);
+    for (size_t i = 0; i < n; ++i) segtree[n + i] = values[i];
+    for (size_t i = n - 1; i > 0; --i) segtree[i] = segtree[i << 1] + segtree[i << 1 | 1];
+}
 
 double JoinUtils::seg_query(size_t l, size_t r) const {
     double res = 0.0;
@@ -84,6 +91,167 @@ double JoinUtils::seg_query(size_t l, size_t r) const {
     return res;
 }
 
+void JoinUtils::build_index_from_vectors_segtree_top_down(const std::vector<double> &sorted_keys, const std::vector<double> &values) {
+    n = sorted_keys.size();
+    keys = sorted_keys; // copy
+    segtree.assign(4 * n, 0.0); // allocate enough space for recursion
+
+    std::function<void(size_t, size_t, size_t)> build = [&](size_t node, size_t l, size_t r) {
+        if (l == r) {
+            segtree[node] = values[l];
+        } else {
+            size_t mid = (l + r) / 2;
+            build(2 * node, l, mid);
+            build(2 * node + 1, mid + 1, r);
+            segtree[node] = segtree[2 * node] + segtree[2 * node + 1];
+        }
+    };
+
+    if (n > 0) {
+        build(1, 0, n - 1);
+    }
+}
+
+double JoinUtils::seg_query_top_down(size_t ql, size_t qr) const {
+    std::function<double(size_t, size_t, size_t)> query = [&](size_t node, size_t l, size_t r) -> double {
+        if (qr < l || ql > r) {
+            return 0.0; // disjoint
+        }
+        if (ql <= l && r <= qr) {
+            return segtree[node]; // fully covered
+        }
+        size_t mid = (l + r) / 2;
+        return query(2 * node, l, mid) + query(2 * node + 1, mid + 1, r);
+    };
+
+    if (n == 0 || ql > qr) return 0.0;
+    return query(1, 0, n - 1);
+}
+
+
+void JoinUtils::build_index_from_vectors_prefix_sums(const std::vector<double> &sorted_keys,
+                                         const std::vector<double> &values) {
+    n = sorted_keys.size();
+    keys = sorted_keys; // copy
+
+    prefix_sums.assign(n + 1, 0.0);
+    for (size_t i = 0; i < n; ++i) {
+        prefix_sums[i + 1] = prefix_sums[i] + values[i];
+    }
+}
+
+double JoinUtils::prefix_sums_query(size_t l, size_t r) const {
+    // r is exclusive
+    return prefix_sums[r] - prefix_sums[l];
+}
+
+void JoinUtils::build_index_from_vectors_sqrt_tree(const std::vector<double> &sorted_keys,
+                                         const std::vector<double> &vals) {
+    n = sorted_keys.size();
+    keys = sorted_keys;
+    values = vals;
+
+    if (n == 0) return;
+
+    block_size = static_cast<size_t>(std::ceil(std::sqrt(n)));
+    size_t num_blocks = (n + block_size - 1) / block_size;
+
+    block_sums.assign(num_blocks, 0.0);
+
+    for (size_t i = 0; i < n; i++) {
+        block_sums[i / block_size] += values[i];
+    }
+}
+
+double JoinUtils::sqrt_query(size_t l, size_t r) const {
+    if (l >= r || n == 0) return 0.0;
+
+    double res = 0.0;
+
+    size_t start_block = l / block_size;
+    size_t end_block   = (r - 1) / block_size;
+
+    if (start_block == end_block) {
+        // all inside one block → sum directly
+        for (size_t i = l; i < r; i++) res += values[i];
+        return res;
+    }
+
+    // left partial block
+    size_t left_end = (start_block + 1) * block_size;
+    for (size_t i = l; i < left_end; i++) res += values[i];
+
+    // full blocks
+    for (size_t b = start_block + 1; b < end_block; b++) {
+        res += block_sums[b];
+    }
+
+    // right partial block
+    size_t right_start = end_block * block_size;
+    for (size_t i = right_start; i < r; i++) res += values[i];
+
+    return res;
+}
+
+
+void JoinUtils::build_index_from_vectors_two_pointer_sweep(const std::vector<double> &sorted_keys,
+                                         const std::vector<double> &vals) {
+    n = sorted_keys.size();
+    keys = sorted_keys;
+    values = vals;
+}
+
+std::vector<double> JoinUtils::sweep_query(
+    const std::vector<std::pair<double,double>> &probe_ranges  // [(start, end)]
+) const {
+    std::vector<double> results(probe_ranges.size());
+
+    // Indices into input
+    size_t lo_ptr = 0;
+    size_t hi_ptr = 0;
+    double running_sum = 0.0;
+
+    // Prepare: sort probes by start (but keep original index to restore order)
+    struct ProbeInfo {
+        double start, end;
+        size_t idx;
+    };
+    std::vector<ProbeInfo> sorted_probes;
+    sorted_probes.reserve(probe_ranges.size());
+    for (size_t i = 0; i < probe_ranges.size(); i++) {
+        sorted_probes.push_back({probe_ranges[i].first, probe_ranges[i].second, i});
+    }
+    std::sort(sorted_probes.begin(), sorted_probes.end(),
+              [](auto &a, auto &b){ return a.start < b.start; });
+
+    // Sweep input alongside probes
+    for (auto &pr : sorted_probes) {
+        double start = pr.start;
+        double end   = pr.end;
+
+        // advance lo_ptr to exclude old rows
+        while (lo_ptr < n && keys[lo_ptr] < start) {
+            running_sum -= values[lo_ptr];
+            lo_ptr++;
+        }
+
+        // advance hi_ptr to include new rows
+        while (hi_ptr < n && keys[hi_ptr] <= end) {
+            running_sum += values[hi_ptr];
+            hi_ptr++;
+        }
+
+        results[pr.idx] = running_sum;
+    }
+
+    return results;
+}
+
+
+
+
+
+
 double JoinUtils::compute_sum_range(const Dataset& input, const FileSchema &schema, const DataRow& probe_row,
                                     const std::string& start_col, const std::string& end_col) const {
     if (n == 0) return 0.0;
@@ -92,9 +260,9 @@ double JoinUtils::compute_sum_range(const Dataset& input, const FileSchema &sche
     size_t end_idx   = end_col.empty()   ? SIZE_MAX : schema.index_of(end_col);
 
     double start = start_col.empty() ? -std::numeric_limits<double>::infinity()
-                                     : extract_numeric(probe_row[start_idx]);
+                                     : probe_row[start_idx];
     double end   = end_col.empty()   ? std::numeric_limits<double>::infinity()
-                                     : extract_numeric(probe_row[end_idx]);
+                                     : probe_row[end_idx];
 
     auto lo_it = std::lower_bound(keys.begin(), keys.end(), start);
     auto hi_it = std::upper_bound(keys.begin(), keys.end(), end);
@@ -116,13 +284,13 @@ std::vector<size_t> JoinUtils::compute_range_join(
      size_t end_idx   = end_col.empty()   ? SIZE_MAX : schema.index_of(end_col);
 
 
-     double start = start_col.empty() ? std::numeric_limits<double>::min() : extract_numeric(probe_row[start_idx]);
-     double end = end_col.empty() ? std::numeric_limits<double>::max() : extract_numeric(probe_row[end_idx]);
+     double start = start_col.empty() ? std::numeric_limits<double>::min() : probe_row[start_idx];
+     double end = end_col.empty() ? std::numeric_limits<double>::max() : probe_row[end_idx];
 
      size_t order_idx  = schema.index_of(order_column);
 
      for (size_t j = 0; j < input.size(); ++j) {
-         double value = extract_numeric(input[j][order_idx]);
+         double value = input[j][order_idx];
          if (value >= start && value <= end) {
              indices.push_back(j);
          }
