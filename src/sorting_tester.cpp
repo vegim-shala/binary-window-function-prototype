@@ -3,6 +3,8 @@
 #include <algorithm> // Required for std::sort and std::generate
 #include <chrono>    // Required for timing
 #include <cstdlib>   // Required for std::rand
+
+#include "data_io.h"
 #include "ips2ra.hpp"
 #include "ips4o/ips4o.hpp"
 
@@ -190,6 +192,31 @@ void ips4o_parallel_sort(std::vector<size_t>& data) {
         std::less<>()
     );
 };
+void ips2ra_parallel_sort2(Dataset &data, const FileSchema &schema, const std::string &order_column, size_t threads) {
+    size_t order_idx  = schema.index_of(order_column);
+    if (threads == 0) {
+        ips2ra::parallel::sort(data.begin(), data.end(),
+            [&](const DataRow &row) {
+                return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
+            });
+    } else {
+        ips2ra::parallel::sort(data.begin(), data.end(),
+            [&](const DataRow &row) {
+                return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
+            }, threads);
+    }
+}
+
+void debug_bias() {
+    Dataset test_data = {{-5}, {-1}, {0}, {1}, {5}, {-10}};
+
+    std::cout << "Value -> Bias transformation:\n";
+    for (const auto& row : test_data) {
+        int32_t value = row[0];
+        uint32_t biased = static_cast<uint32_t>(value) + (1UL << 31);
+        std::cout << value << " -> " << biased << "\n";
+    }
+}
 
 int main() {
     // Create a vector with 10 million elements (1e7 is 10 million, 1e6 is 1 million) and fill it with random integers
@@ -198,9 +225,9 @@ int main() {
     std::generate(data.begin(), data.end(), std::rand);
 
     // Divide every element by size to reduce the range of values for counting sort
-    for (auto& num : data) {
-        num = num % (size/100); // Reduce range to 0-999 for counting sort
-    }
+    // for (auto& num : data) {
+    //     num = num % (size/1000); // Reduce range to 0-999 for counting sort
+    // }
 
     // Time the sorting
     auto start = std::chrono::high_resolution_clock::now();
@@ -224,6 +251,35 @@ int main() {
 
     // Print the result
     std::cout << "Time taken to sort " << size << " integers: " << duration.count() << " milliseconds" << std::endl;
+
+    // Test your current (broken) partitioning:
+    Dataset test_data = {
+        { -5, 100 },
+        { -1, 200 },
+        { 0, 300 },
+        { 1, 400 },
+        { 5, 500 },
+        { -10, 600 }
+    };
+
+    std::cout << "Original dataset:\n";
+    for (const auto& row : test_data) {
+        std::cout << "[" << row[0] << ", " << row[1] << "]\n";
+    }
+
+    // Create a simple schema for testing
+    FileSchema schema;
+    schema.add_column("value", "int32");
+    schema.add_column("other", "int32");
+    schema.build_index();
+
+    // Sort by first column
+    ips2ra_parallel_sort2(test_data, schema, "value", 0);
+
+    std::cout << "\nSorted dataset:\n";
+    for (const auto& row : test_data) {
+        std::cout << "[" << row[0] << ", " << row[1] << "]\n";
+    }
 
     return 0;
 }

@@ -32,17 +32,17 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     // 1. Index-Based Partitioning -> morsel-parallelism
     auto part_start = std::chrono::high_resolution_clock::now();
     auto input_idx_partitions = PartitionUtils::partition_dataset_radix_morsel(
-        input, input_schema, spec.partition_columns, 8, 8);
+        input, input_schema, spec.partition_columns, 8, 8, 2048);
     auto probe_idx_partitions = PartitionUtils::partition_dataset_radix_morsel(
-        probe, probe_schema, spec.partition_columns, 8, 8);
+        probe, probe_schema, spec.partition_columns, 8, 8, 2048);
     auto part_end = std::chrono::high_resolution_clock::now();
     std::cout << "Partitioning wall time: "
             << std::chrono::duration_cast<std::chrono::milliseconds>(part_end - part_start).count()
             << " ms" << std::endl;
-    
+
 
     auto join_start = std::chrono::high_resolution_clock::now();
-    
+
     // 2. Create thread pool and config batching parameters
     size_t pool_size = std::thread::hardware_concurrency();
     if (pool_size == 0) pool_size = 2;
@@ -59,22 +59,7 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     using IndexDataset = PartitionUtils::IndexDataset;
     std::function<void(PartitionUtils::IndexDataset, PartitionUtils::IndexDataset)> partition_task;
     partition_task = [&](IndexDataset in_indices, IndexDataset pr_indices) {
-        if (pr_indices.empty()) return;
-
-        // If there is no input for this partition, output -1 for all probe rows -> FOR NOW (TODO: change later)
-        if (in_indices.empty()) {
-            std::vector<DataRow> local_out;
-            local_out.reserve(pr_indices.size());
-            for (size_t probe_idx: pr_indices) {
-                DataRow out = probe[probe_idx];
-                out.push_back(-1.0);
-                local_out.emplace_back(std::move(out));
-            } {
-                std::lock_guard<std::mutex> lk(result_mtx);
-                std::move(local_out.begin(), local_out.end(), std::back_inserter(result));
-            }
-            return;
-        }
+        if (pr_indices.empty() || in_indices.empty()) return;
 
         // a) Sort the Input indices by order_column
         const size_t order_idx = input_schema.index_of(spec.order_column);
@@ -145,11 +130,13 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
                             size_t hi = hi_it - keys.begin();
 
                             double agg_sum = 0.0;
-                            if (lo < hi) agg_sum = local_join.seg_query(lo, hi);
+                            if (lo < hi) {
+                                agg_sum = local_join.seg_query(lo, hi);
 
-                            DataRow out = probe_row;
-                            out.push_back(agg_sum);
-                            local_out.emplace_back(std::move(out));
+                                DataRow out = probe_row;
+                                out.push_back(agg_sum);
+                                local_out.emplace_back(std::move(out));
+                            }
                         }
                         return local_out;
                     }
@@ -191,11 +178,13 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
                 size_t hi = hi_it - keys.begin();
 
                 double agg_sum = 0.0;
-                if (lo < hi) agg_sum = local_join.seg_query(lo, hi);
+                if (lo < hi) {
+                    agg_sum = local_join.seg_query(lo, hi);
 
-                DataRow out = probe_row;
-                out.push_back(agg_sum);
-                local_out.emplace_back(std::move(out));
+                    DataRow out = probe_row;
+                    out.push_back(agg_sum);
+                    local_out.emplace_back(std::move(out));
+                }
             }
 
             // single flush

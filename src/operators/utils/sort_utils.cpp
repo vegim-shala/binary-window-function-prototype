@@ -121,7 +121,7 @@ void ips2ra_sort(Dataset &data, const FileSchema &schema,  const std::string &or
   	size_t order_idx  = schema.index_of(order_column);
     ips2ra::sort(data.begin(), data.end(),
                            [&](const DataRow &row) {
-                               return static_cast<size_t>(row[order_idx]);
+                               return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
                            });
 };
 
@@ -137,12 +137,12 @@ void ips2ra_parallel_sort(Dataset &data, const FileSchema &schema, const std::st
     if (threads == 0) {
         ips2ra::parallel::sort(data.begin(), data.end(),
             [&](const DataRow &row) {
-                return static_cast<size_t>(row[order_idx]);
+                return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
             });
     } else {
         ips2ra::parallel::sort(data.begin(), data.end(),
             [&](const DataRow &row) {
-                return static_cast<size_t>(row[order_idx]);
+                return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
             }, threads);
     }
 }
