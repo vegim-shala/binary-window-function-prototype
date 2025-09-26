@@ -31,10 +31,14 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
 
     // 1. Index-Based Partitioning -> morsel-parallelism
     auto part_start = std::chrono::high_resolution_clock::now();
-    auto input_idx_partitions = PartitionUtils::partition_dataset_radix_morsel(
-        input, input_schema, spec.partition_columns, 8, 8, 2048);
-    auto probe_idx_partitions = PartitionUtils::partition_dataset_radix_morsel(
-        probe, probe_schema, spec.partition_columns, 8, 8, 2048);
+    auto input_idx_partitions = PartitionUtils::partition_indices_parallel(
+        input, input_schema, spec.partition_columns,
+        std::thread::hardware_concurrency(), 2048, 8
+    );
+    auto probe_idx_partitions = PartitionUtils::partition_indices_parallel(
+        probe, probe_schema, spec.partition_columns,
+        std::thread::hardware_concurrency(), 2048, 8
+    );
     auto part_end = std::chrono::high_resolution_clock::now();
     std::cout << "Partitioning wall time: "
             << std::chrono::duration_cast<std::chrono::milliseconds>(part_end - part_start).count()
@@ -197,25 +201,43 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     std::vector<std::pair<std::string, std::pair<IndexDataset, IndexDataset> > > worklist;
     worklist.reserve(1024);
 
-    for (size_t bucket = 0; bucket < probe_idx_partitions.size(); ++bucket) {
-        // probe indices for this bucket
-        IndexDataset pr_inds = probe_idx_partitions[bucket];
+    std::visit([&](auto &probe_map) {
+    for (auto &kv : probe_map) {
+        const auto &key = kv.first;
+        const IndexDataset &pr_inds = kv.second;
 
-        // skip empty probe buckets to save work
         if (pr_inds.empty()) continue;
 
-        // matching input indices
         IndexDataset in_inds;
-        if (bucket < input_idx_partitions.size()) {
-            in_inds = input_idx_partitions[bucket];
+        std::visit([&](auto &input_map) {
+            using InputKeyT = typename std::decay_t<decltype(input_map)>::key_type;
+            using ProbeKeyT = std::decay_t<decltype(key)>;
+
+            if constexpr (std::is_same_v<InputKeyT, ProbeKeyT>) {
+                auto it = input_map.find(key);
+                if (it != input_map.end()) {
+                    in_inds = it->second; // copy for now
+                }
+            }
+        }, input_idx_partitions);
+
+        // build debug string for key
+        std::string key_str;
+        using KeyT = std::decay_t<decltype(key)>;
+        if constexpr (std::is_same_v<KeyT, int32_t>) {
+            key_str = std::to_string(key);
+        } else {
+            key_str.reserve(key.size() * 6);
+            for (size_t i = 0; i < key.size(); ++i) {
+                if (i) key_str.push_back('|');
+                key_str += std::to_string(key[i]);
+            }
         }
 
-        // build a compact string representation of the bucket ID (debug)
-        std::string key_str = std::to_string(bucket);
-
         worklist.emplace_back(std::move(key_str),
-                              std::make_pair(std::move(in_inds), std::move(pr_inds)));
+                              std::make_pair(std::move(in_inds), pr_inds));
     }
+}, probe_idx_partitions);
 
     // submit partition tasks in batches (so we don't occupy entire pool with partition tasks, but we might change this cause sorting is the only competitor on thread utilization)
     for (size_t pos = 0; pos < worklist.size(); pos += batch_size) {

@@ -375,7 +375,7 @@ int main() {
     // Time the parallel partitioning
     auto startParallelPartitioningMorselMergeFree = std::chrono::high_resolution_clock::now();
 
-    auto input_partitions_parallel_morsel_radix = PartitionUtils::partition_dataset_radix_morsel(input4, input_schema4, partition_columns, 8, 16, 2048);
+    auto input_partitions_parallel_morsel_radix = PartitionUtils::partition_dataset_radix_morsel(input4, input_schema4, partition_columns, 8, 8, 2048);
 
     auto endParallelPartitioningMorselMergeFree = std::chrono::high_resolution_clock::now();
     auto durationParallelPartitioningMorselMergeFree = std::chrono::duration_cast<std::chrono::milliseconds>(
