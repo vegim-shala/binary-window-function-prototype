@@ -23,24 +23,28 @@ public:
         std::cout << "=== Binary Window Function Benchmark Suite ===\n\n";
 
         // Test different scenarios
-        test_few_large_partitions(); // A1
-        test_many_small_partitions(); // A2
-        test_equal_partitions_and_rows(); // A3
-        test_less_partitions_in_probe(); // B1
-        test_less_partitions_in_input(); // B2
-        test_one_row_probe(); // C1
-        test_A1_bigger_ranges(); // D1
-        test_A1_very_small_ranges(); // D2
+        // test_few_large_partitions(); // A1
+        // test_many_small_partitions(); // A2
+        // test_equal_partitions_and_rows(); // A3
+        // test_less_partitions_in_probe(); // B1
+        // test_less_partitions_in_input(); // B2
+        // test_one_row_probe(); // C1
+        // test_A1_bigger_ranges(); // D1
+        // test_A1_very_small_ranges(); // D2
+        test_multiple_partitioning_columns(); // E1
 
         std::cout << "\n=== Benchmark Complete ===\n";
     }
 
 private:
 
-    BinaryWindowFunctionModel create_test_model() {
+    BinaryWindowFunctionModel create_test_model(int num_partition_cols) {
         BinaryWindowFunctionModel model;
         model.value_column = "value";
         model.partition_columns = {"category"};
+        if (num_partition_cols > 1) {
+            model.partition_columns = {"category1", "category2"};
+        }
         model.order_column = "timestamp";
         model.output_column = "sum_result";
 
@@ -71,7 +75,7 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionModel model = create_test_model(1);
             BinaryWindowFunctionOperator op(model);
 
             auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
@@ -97,7 +101,7 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionModel model = create_test_model(1);
             BinaryWindowFunctionOperator op(model);
 
             auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
@@ -123,7 +127,7 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionModel model = create_test_model(1);
             BinaryWindowFunctionOperator op(model);
 
             auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
@@ -149,7 +153,7 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionModel model = create_test_model(1);
             BinaryWindowFunctionOperator op(model);
 
             auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
@@ -175,7 +179,7 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionModel model = create_test_model(1);
             BinaryWindowFunctionOperator op(model);
 
             auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
@@ -201,7 +205,7 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionModel model = create_test_model(1);
             BinaryWindowFunctionOperator op(model);
 
             auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
@@ -227,7 +231,7 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionModel model = create_test_model(1);
             BinaryWindowFunctionOperator op(model);
 
             auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
@@ -253,7 +257,7 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model();
+            BinaryWindowFunctionModel model = create_test_model(1);
             BinaryWindowFunctionOperator op(model);
 
             auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
@@ -262,57 +266,33 @@ private:
         std::cout << "---------------------------------------------------------------------------------\n";
     }
 
-    void test_mixed_scenarios() {
-//        std::cout << "3. Testing MIXED scenarios\n";
-//
-//        std::vector<std::pair<int, int>> scenarios = {
-//            {100, 1000},    // 100 partitions, 1K rows
-//            {1000, 100},    // 1K partitions, 100 rows
-//            {500, 500},     // Balanced
-//            {50, 10000}     // Very large partitions
-//        };
-//
-//        for (size_t i = 0; i < scenarios.size(); ++i) {
-//            auto [partitions, rows_per_part] = scenarios[i];
-//            std::string name = "test_mixed_" + std::to_string(i);
-//
-//            std::cout << "   Scenario " << i+1 << ": " << partitions
-//                      << " partitions, " << rows_per_part << " rows each\n";
-//
-//            generate_test_data(name, partitions, rows_per_part);
-//
-//            auto [input, schema] = read_csv(name + "_input.csv");
-//            auto [probe, _] = read_csv(name + "_probe.csv");
-//
-//            BinaryWindowFunctionOperator op;
-//            auto spec = create_test_spec();
-//
-//            auto start = std::chrono::high_resolution_clock::now();
-//            auto [result, result_schema] = op.execute(input, probe, schema, spec);
-//            auto end = std::chrono::high_resolution_clock::now();
-//
-//            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-//            std::cout << "   Time: " << duration.count() << " ms, "
-//                      << "Results: " << result.size() << "\n";
-//
-//            cleanup_test_data(name);
-//        }
-//        std::cout << "\n";
+    void test_multiple_partitioning_columns() {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "E1. Scenario: A1 with multiple partitioning columns)\n";
+
+        std::vector<std::pair<std::string, std::string>> files = {
+            {"many_partitioning_cols/input1.csv", "many_partitioning_cols/probe1.csv"}, // 10x1000, Partitions: 1x10
+            {"many_partitioning_cols/input2.csv", "many_partitioning_cols/probe2.csv"}, // 10x10000, Partitions: 1x10
+            {"many_partitioning_cols/input3.csv", "many_partitioning_cols/probe3.csv"}, // 100x10000, Partitions: 10x10
+            {"many_partitioning_cols/input4.csv", "many_partitioning_cols/probe4.csv"} // 100x100000, Partitions: 10x10
+        };
+
+        for(int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_optimized(files[i].first);
+            auto [probe, probe_schema] = read_csv_optimized(files[i].second);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            BinaryWindowFunctionModel model = create_test_model(2);
+            BinaryWindowFunctionOperator op(model);
+
+            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
     }
 
-//    void generate_test_data(const std::string& base_name, int n_partitions, int rows_per_part) {
-//        // Use Python script or C++ data generation
-//        std::string cmd = "python generate_test_data.py " +
-//                         std::to_string(n_partitions) + " " +
-//                         std::to_string(rows_per_part) + " " +
-//                         base_name;
-//        system(cmd.c_str());
-//    }
-//
-//    void cleanup_test_data(const std::string& base_name) {
-//        fs::remove(base_name + "_input.csv");
-//        fs::remove(base_name + "_probe.csv");
-//    }
+
 };
 
 int main() {

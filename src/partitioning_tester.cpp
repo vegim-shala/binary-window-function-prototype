@@ -1,340 +1,87 @@
 #include "data_io.h"
 #include <vector>
 #include <iostream>
-#include "data_processing.h"
 #include <chrono>
 #include <thread>
-#include <mutex>
-#include <unordered_map>
 #include <string>
 #include <operators/utils/partition_utils.h>
-#include <numeric>
-#include <atomic>
 
-using namespace std;
+using namespace PartitionUtils;
+#include <algorithm>
 
-#include <cstddef>
-#include <cstdint>
-#include <omp.h>
+bool compare_partitions(const PartitionIndexResult &a,
+                        const PartitionIndexResult &b,
+                        bool ignore_order = true) {
+    // Case 1: int32_t key
+    if (std::holds_alternative<std::unordered_map<int32_t, IndexDataset>>(a) &&
+        std::holds_alternative<std::unordered_map<int32_t, IndexDataset>>(b)) {
 
-// Safe integer extractor
-// inline int32_t get_int32(const ColumnValue &val) {
-//     return std::visit([](auto &&v) -> int32_t {
-//         using T = std::decay_t<decltype(v)>;
-//         if constexpr (std::is_same_v<T, int>) {
-//             return v;
-//         } else if constexpr (std::is_same_v<T, double>) {
-//             return static_cast<int32_t>(v);
-//         } else if constexpr (std::is_same_v<T, std::string>) {
-//             return std::stoi(v); // fallback (slow) – avoid if possible
-//         } else {
-//             throw std::runtime_error("Unsupported type in get_int32");
-//         }
-//     }, val);
-// }
+        const auto &ma = std::get<std::unordered_map<int32_t, IndexDataset>>(a);
+        const auto &mb = std::get<std::unordered_map<int32_t, IndexDataset>>(b);
 
-// Custom hash for vector<int64_t>
-struct VecHash {
-    std::size_t operator()(const std::vector<int32_t> &v) const noexcept {
-        std::size_t h = 0;
-        for (auto x: v) {
-            // Simple hash combine - avoid expensive operations
-            h ^= std::hash<int32_t>{}(x) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        if (ma.size() != mb.size()) return false;
+
+        for (const auto &kv : ma) {
+            auto it = mb.find(kv.first);
+            if (it == mb.end()) return false;
+
+            const auto &va = kv.second;
+            const auto &vb = it->second;
+            if (va.size() != vb.size()) return false;
+
+            if (ignore_order) {
+                if (!std::is_permutation(va.begin(), va.end(), vb.begin()))
+                    return false;
+            } else {
+                if (va != vb) return false;
+            }
         }
-        return h;
-    }
-};
-
-struct VecEq {
-    bool operator()(const std::vector<int32_t> &a,
-                    const std::vector<int32_t> &b) const noexcept {
-        return a == b;
-    }
-};
-
-using PartitionResult = std::variant<
-    std::unordered_map<int32_t, Dataset>,
-    std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>
->;
-
-PartitionResult partition_dataset(
-    Dataset &dataset,
-    const FileSchema &schema,
-    const std::vector<std::string> &partition_columns
-) {
-    if (partition_columns.empty()) {
-        std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> result;
-        result[{}] = std::move(dataset);
-        return result;
+        return true;
     }
 
-    // Precompute indices
-    std::vector<size_t> col_indices;
-    col_indices.reserve(partition_columns.size());
-    for (const auto &col : partition_columns) {
-        col_indices.push_back(schema.index_of(col));
-    }
+    // Case 2: vector<int32_t> key
+    if (std::holds_alternative<std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq>>(a) &&
+        std::holds_alternative<std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq>>(b)) {
 
-    // Specialized case: 1 column
-    if (partition_columns.size() == 1) {
-        std::unordered_map<int32_t, Dataset> partitions;
-        size_t col_idx = col_indices[0];
-        for (auto &row : dataset) {
-            partitions[row[col_idx]].emplace_back(std::move(row));
+        const auto &ma = std::get<std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq>>(a);
+        const auto &mb = std::get<std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq>>(b);
+
+        if (ma.size() != mb.size()) return false;
+
+        for (const auto &kv : ma) {
+            auto it = mb.find(kv.first);
+            if (it == mb.end()) return false;
+
+            const auto &va = kv.second;
+            const auto &vb = it->second;
+            if (va.size() != vb.size()) return false;
+
+            if (ignore_order) {
+                if (!std::is_permutation(va.begin(), va.end(), vb.begin()))
+                    return false;
+            } else {
+                if (va != vb) return false;
+            }
         }
-        dataset.clear();
-        return partitions;
+        return true;
     }
 
-    // Generic case: multiple columns
-    std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> partitions;
-    std::vector<int32_t> key;
-    key.reserve(col_indices.size());
-    for (auto &row : dataset) {
-        key.clear();
-        for (size_t idx : col_indices) {
-            key.push_back(row[idx]);
-        }
-        partitions[key].emplace_back(std::move(row));
-    }
-    dataset.clear();
-    return partitions;
+    // If types differ (e.g. one is int32 map, other is vector<int32> map)
+    return false;
 }
-
-
-// Parallel partitioning
-PartitionResult partition_dataset_parallel(
-    Dataset &dataset,
-    const FileSchema &schema,
-    const std::vector<std::string> &partition_columns,
-    size_t num_threads = std::thread::hardware_concurrency()
-) {
-    if (partition_columns.empty()) {
-        std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> result;
-        result[{}] = std::move(dataset);
-        return result;
-    }
-
-    // Precompute column indices
-    std::vector<size_t> col_indices;
-    col_indices.reserve(partition_columns.size());
-    for (const auto &col : partition_columns) {
-        col_indices.push_back(schema.index_of(col));
-    }
-
-    size_t n = dataset.size();
-    size_t chunk_size = (n + num_threads - 1) / num_threads;
-
-    if (partition_columns.size() == 1) {
-        // Thread-local maps for int32 keys
-        std::vector<std::unordered_map<int32_t, Dataset>> thread_partitions(num_threads);
-
-        #pragma omp parallel num_threads(num_threads)
-        {
-            int tid = omp_get_thread_num();
-            auto &local = thread_partitions[tid];
-            size_t start = tid * chunk_size;
-            size_t end = std::min(start + chunk_size, n);
-
-            for (size_t i = start; i < end; ++i) {
-                local[dataset[i][col_indices[0]]].emplace_back(std::move(dataset[i]));
-            }
-        }
-
-        // Merge results
-        std::unordered_map<int32_t, Dataset> global;
-        for (auto &tp : thread_partitions) {
-            for (auto &kv : tp) {
-                auto &vec = global[kv.first];
-                std::move(kv.second.begin(), kv.second.end(), std::back_inserter(vec));
-            }
-        }
-        dataset.clear();
-        return global;
-    } else {
-        // Thread-local maps for vector<int32_t> keys
-        std::vector<std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>> thread_partitions(num_threads);
-
-        #pragma omp parallel num_threads(num_threads)
-        {
-            int tid = omp_get_thread_num();
-            auto &local = thread_partitions[tid];
-            size_t start = tid * chunk_size;
-            size_t end = std::min(start + chunk_size, n);
-
-            std::vector<int32_t> key;
-            key.reserve(col_indices.size());
-
-            for (size_t i = start; i < end; ++i) {
-                key.clear();
-                for (size_t idx : col_indices) {
-                    key.push_back(dataset[i][idx]);
-                }
-                local[key].emplace_back(std::move(dataset[i]));
-            }
-        }
-
-        // Merge results
-        std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> global;
-        for (auto &tp : thread_partitions) {
-            for (auto &kv : tp) {
-                auto &vec = global[kv.first];
-                std::move(kv.second.begin(), kv.second.end(), std::back_inserter(vec));
-            }
-        }
-        dataset.clear();
-        return global;
-    }
-}
-
-
-bool compare_datasets(const Dataset& d1, const Dataset& d2) {
-    if (d1.size() != d2.size()) {
-        std::cout << "Datasets have different sizes." << std::endl;
-        return false;
-    }
-
-    // Create copies to sort. Sorting by row to enable a consistent comparison.
-    // Assuming Row has a way to be compared, e.g., a custom operator< or a way to convert to a sortable type.
-    // For now, let's assume Row can be sorted, e.g., it is a vector of simple types.
-    Dataset sorted_d1 = d1;
-    Dataset sorted_d2 = d2;
-    std::sort(sorted_d1.begin(), sorted_d1.end());
-    std::sort(sorted_d2.begin(), sorted_d2.end());
-
-    if (sorted_d1 != sorted_d2) {
-        std::cout << "Datasets contain different rows." << std::endl;
-        return false;
-    }
-
-    return true;
-}
-
-bool compare_partition_outputs(
-    std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>& p1,
-    std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>& p2)
-{
-    if (p1.size() != p2.size()) {
-        std::cout << "Number of partitions is different." << std::endl;
-        return false;
-    }
-
-    for (const auto& pair : p1) {
-        const auto& key = pair.first;
-        const auto& dataset1 = pair.second;
-
-        // Check if the key exists in the second map
-        if (p2.find(key) == p2.end()) {
-            std::cout << "Key not found in second map." << std::endl;
-            return false;
-        }
-
-        const auto& dataset2 = p2.at(key);
-
-        // Compare the datasets for this key
-        if (!compare_datasets(dataset1, dataset2)) {
-            std::cout << "Datasets for key differ: ";
-            for (int32_t val : key) {
-                std::cout << val << " ";
-            }
-            std::cout << std::endl;
-            return false;
-        }
-    }
-
-    return true;
-}
-
-
-
-
-
-// ThIS COULD BE USED FOR DISPATCHING IF NEEDED AND COULD BE FASTER BY 15 MILLISECONDS -> to be checked for 10 millions
-// // Generic version for multiple columns
-// std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>
-// partition_dataset_impl(
-//     Dataset &dataset,
-//     const std::vector<size_t>& col_indices
-// ) {
-//     std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> partitions;
-//
-//     // Reuse key vector
-//     std::vector<int32_t> key;
-//     key.reserve(col_indices.size());
-//
-//     for (auto &row: dataset) {
-//         key.clear();
-//         for (size_t idx: col_indices) {
-//             key.push_back(get_int32(row[idx]));
-//         }
-//         partitions[key].emplace_back(std::move(row));
-//     }
-//
-//     return partitions;
-// }
-//
-// // Specialized version for single column
-// std::unordered_map<int32_t, Dataset>
-// partition_dataset_single_impl(
-//     Dataset &dataset,
-//     size_t col_index
-// ) {
-//     std::unordered_map<int32_t, Dataset> partitions;
-//
-//     for (auto &row: dataset) {
-//         int32_t key = get_int32(row[col_index]);
-//         partitions[key].emplace_back(std::move(row));
-//     }
-//
-//     return partitions;
-// }
-//
-// // Main dispatch function
-// using PartitionResult = std::variant<
-//     std::unordered_map<int32_t, Dataset>,
-//     std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq>
-// >;
-//
-// PartitionResult partition_dataset_main(
-//     Dataset &dataset,
-//     const FileSchema &schema,
-//     const std::vector<std::string> &partition_columns
-// ) {
-//     if (partition_columns.empty()) {
-//         std::unordered_map<std::vector<int32_t>, Dataset, VecHash, VecEq> result;
-//         result[{}] = std::move(dataset);
-//         return result;
-//     }
-//
-//     // Precompute column indices
-//     std::vector<size_t> col_indices;
-//     col_indices.reserve(partition_columns.size());
-//     for (const auto &col: partition_columns) {
-//         col_indices.push_back(schema.index_of(col));
-//     }
-//
-//     // Dispatch to specialized implementation
-//     if (partition_columns.size() == 1) {
-//         return partition_dataset_single_impl(dataset, col_indices[0]);
-//     } else {
-//         return partition_dataset_impl(dataset, col_indices);
-//     }
-// }
-
-
 
 int main() {
-    cout << "START PROCESSING:" << endl;
-
-    auto [input, input_schema] = read_csv_optimized("official_duckdb_test/input3.csv");
-
-    // Create a vector with one element called "category"
+    // cout << "START PROCESSING:" << endl;
+    //
+    auto [input, input_schema] = read_csv_optimized("official_duckdb_test/input1.csv");
+    //
+    // // Create a vector with one element called "category"
     std::vector<std::string> partition_columns = {"category"};
-
-    // Time the partitioning
+    //
+    // // Time the partitioning
     auto startSecondPartitioning = std::chrono::high_resolution_clock::now();
 
-    auto input_partitions_sequential2 = partition_dataset(input, input_schema, partition_columns);
+    auto input_partitions_sequential2 = PartitionUtils::partition_dataset_index(input, input_schema, partition_columns);
 
     auto endSecondPartitioning = std::chrono::high_resolution_clock::now();
     auto durationSecondPartitioning = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -342,55 +89,71 @@ int main() {
     std::cout << "Time taken to partition the input sequentially: " << durationSecondPartitioning.count() <<
             " milliseconds" << std::endl;
 
-    auto [input2, input_schema2] = read_csv_optimized("official_duckdb_test/input3.csv");
+    auto [input2, input_schema2] = read_csv_optimized("official_duckdb_test/input1.csv");
+    auto s = radix_setup(input2, input_schema2, partition_columns, 8);
 
     // Time the parallel partitioning
     auto startParallelPartitioning = std::chrono::high_resolution_clock::now();
 
-    auto input_partitions_parallel = PartitionUtils::partition_dataset_radix_advanced(input2, input_schema2, partition_columns, 8, 16);
+    auto input_partitions_parallel = PartitionUtils::partition_indices_sequential(
+        input, input_schema, partition_columns
+    );
 
     auto endParallelPartitioning = std::chrono::high_resolution_clock::now();
     auto durationParallelPartitioning = std::chrono::duration_cast<std::chrono::milliseconds>(
         endParallelPartitioning - startParallelPartitioning);
-    std::cout << "Time taken to partition the input in parallel radix: " << durationParallelPartitioning.count() <<
+    std::cout << "Time taken to partition the input in sequential radix: " << durationParallelPartitioning.count() <<
             " milliseconds" << std::endl;
-
-
-    auto [input3, input_schema3] = read_csv_optimized("official_duckdb_test/input3.csv");
+    //
+    // auto [input3, input_schema3] = read_csv_optimized("official_duckdb_test/input1.csv");
+    //
+    // // Time the parallel partitioning
+    // auto startParallelPartitioningIndexMorsel = std::chrono::high_resolution_clock::now();
+    //
+    // auto input_partitions_parallel_index_morsel = PartitionUtils::partition_dataset_index_morsel(input3, input_schema3, partition_columns);
+    //
+    // auto endParallelPartitioningIndexMorsel = std::chrono::high_resolution_clock::now();
+    // auto durationParallelPartitioningIndexMorsel = std::chrono::duration_cast<std::chrono::milliseconds>(
+    //     endParallelPartitioningIndexMorsel - startParallelPartitioningIndexMorsel);
+    // std::cout << "Time taken to partition the input in parallel morsel: " << durationParallelPartitioningIndexMorsel.count() <<
+    //         " milliseconds" << std::endl;
+    //
+    // auto [input4, input_schema4] = read_csv_optimized("official_duckdb_test/input1.csv");
+    //
+    // // Time the parallel partitioning
+    // auto startParallelPartitioningMorsel = std::chrono::high_resolution_clock::now();
+    //
+    // auto input_partitions_parallel_morsel = PartitionUtils::partition_dataset_radix_morsel(input4, input_schema4, partition_columns, 8, 8, 2048);
+    //
+    // auto endParallelPartitioningMorsel = std::chrono::high_resolution_clock::now();
+    // auto durationParallelPartitioningMorsel = std::chrono::duration_cast<std::chrono::milliseconds>(
+    //     endParallelPartitioningMorsel - startParallelPartitioningMorsel);
+    // std::cout << "Time taken to partition the input in parallel radix morsel: " << durationParallelPartitioningMorsel.count() <<
+    //         " milliseconds" << std::endl;
+    //
+    //
+    // auto [input5, input_schema5] = read_csv_optimized("official_duckdb_test/input1.csv");
 
     // Time the parallel partitioning
-    auto startParallelPartitioningMorsel = std::chrono::high_resolution_clock::now();
+    // auto startParallelPartitioningRadixMorsel = std::chrono::high_resolution_clock::now();
+    //
+    // auto input_partitions_parallel_radix_morsel = PartitionUtils::partition_dataset_hash_radix_sequential_multi(input5, input_schema5, partition_columns, 8);
+    //
+    // auto endParallelPartitioningRadixMorsel = std::chrono::high_resolution_clock::now();
+    // auto durationParallelPartitioningRadixMorsel = std::chrono::duration_cast<std::chrono::milliseconds>(
+    //     endParallelPartitioningRadixMorsel - startParallelPartitioningRadixMorsel);
+    // std::cout << "Time taken to partition the input in radix multiple : " << durationParallelPartitioningRadixMorsel.count() <<
+    //         " milliseconds" << std::endl;
 
-    auto input_partitions_parallel_morsel = PartitionUtils::partition_dataset_index_morsel(input3, input_schema3, partition_columns);
-
-    auto endParallelPartitioningMorsel = std::chrono::high_resolution_clock::now();
-    auto durationParallelPartitioningMorsel = std::chrono::duration_cast<std::chrono::milliseconds>(
-        endParallelPartitioningMorsel - startParallelPartitioningMorsel);
-    std::cout << "Time taken to partition the input in parallel morsel: " << durationParallelPartitioningMorsel.count() <<
-            " milliseconds" << std::endl;
-
-
-    auto [input4, input_schema4] = read_csv_optimized("official_duckdb_test/input3.csv");
-
-    // Time the parallel partitioning
-    auto startParallelPartitioningMorselMergeFree = std::chrono::high_resolution_clock::now();
-
-    auto input_partitions_parallel_morsel_radix = PartitionUtils::partition_dataset_radix_morsel(input4, input_schema4, partition_columns, 8, 8, 2048);
-
-    auto endParallelPartitioningMorselMergeFree = std::chrono::high_resolution_clock::now();
-    auto durationParallelPartitioningMorselMergeFree = std::chrono::duration_cast<std::chrono::milliseconds>(
-        endParallelPartitioningMorselMergeFree - startParallelPartitioningMorselMergeFree);
-    std::cout << "Time taken to partition the input in parallel morsel radix: " << durationParallelPartitioningMorselMergeFree.count() <<
-            " milliseconds" << std::endl;
 
 
     // Compare the outputs
-    // std::cout << "\nStarting comparison..." << std::endl;
-    // if (compare_partition_outputs(input_partitions_sequential2, input_partitions_parallel)) {
-    //     std::cout << "The two partitioning functions returned the same data. Test passed! ✅" << std::endl;
-    // } else {
-    //     std::cout << "The two partitioning functions returned different data. Test failed! ❌" << std::endl;
-    // }
+    std::cout << "\nStarting comparison..." << std::endl;
+    if (compare_partitions(input_partitions_sequential2, input_partitions_parallel)) {
+        std::cout << "The two partitioning functions returned the same data. Test passed! ✅" << std::endl;
+    } else {
+        std::cout << "The two partitioning functions returned different data. Test failed! ❌" << std::endl;
+    }
 
     return 0;
 }

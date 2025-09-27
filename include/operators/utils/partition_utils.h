@@ -12,13 +12,19 @@ namespace PartitionUtils {
 
     // Custom hash for vector<int64_t>
     struct VecHash {
-        std::size_t operator()(const std::vector<int32_t> &v) const noexcept {
-            std::size_t h = 0;
-            for (auto x: v) {
-                // Simple hash combine - avoid expensive operations
-                h ^= std::hash<int32_t>{}(x) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        size_t operator()(const std::vector<int32_t>& v) const noexcept {
+            // 64-bit FNV-1a-ish multiplicative mix
+            uint64_t h = 1469598103934665603ull;
+            for (int32_t x : v) {
+                uint64_t u = static_cast<uint64_t>(static_cast<uint32_t>(x));
+                h ^= u;
+                h *= 1099511628211ull;
             }
-            return h;
+            // final xor-fold for 64->size_t if needed
+            if constexpr (sizeof(size_t) < 8) {
+                h ^= (h >> 32);
+            }
+            return static_cast<size_t>(h);
         }
     };
 
@@ -43,12 +49,12 @@ namespace PartitionUtils {
     >;
 
     inline std::vector<size_t> compute_col_indices(
-    const FileSchema &schema,
-    const std::vector<std::string> &partition_columns
-) {
+        const FileSchema &schema,
+        const std::vector<std::string> &partition_columns
+    ) {
         std::vector<size_t> col_indices;
         col_indices.reserve(partition_columns.size());
-        for (auto &c : partition_columns) {
+        for (auto &c: partition_columns) {
             col_indices.push_back(schema.index_of(c));
         }
         return col_indices;
@@ -63,7 +69,7 @@ namespace PartitionUtils {
     ) {
         std::vector<int32_t> key;
         key.reserve(col_indices.size());
-        for (auto idx : col_indices) {
+        for (auto idx: col_indices) {
             key.push_back(dataset[row_idx][idx]);
         }
         auto &vec = local_map[key];
@@ -75,10 +81,10 @@ namespace PartitionUtils {
 
     inline void merge_maps(
         std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq> &global,
-        std::vector<std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq>> &thread_parts
+        std::vector<std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq> > &thread_parts
     ) {
-        for (auto &tp : thread_parts) {
-            for (auto &kv : tp) {
+        for (auto &tp: thread_parts) {
+            for (auto &kv: tp) {
                 auto &dst = global[kv.first];
                 if (dst.empty()) {
                     dst.reserve(kv.second.size());
@@ -118,7 +124,7 @@ namespace PartitionUtils {
         const std::vector<std::string> &partition_columns,
         size_t radix_bits
     ) {
-        RadixSetup s;
+        RadixSetup s{};
         s.n = dataset.size();
         s.num_buckets = size_t(1) << radix_bits;
         s.mask = s.num_buckets - 1;
@@ -134,7 +140,7 @@ namespace PartitionUtils {
         std::vector<size_t> &counts
     ) {
         for (size_t i = start; i < end; ++i) {
-            uint32_t value = static_cast<uint32_t>(dataset[i][col_idx]);
+            auto value = static_cast<uint32_t>(dataset[i][col_idx]);
             size_t bucket = value & mask;
             counts[bucket]++;
         }
@@ -157,15 +163,15 @@ namespace PartitionUtils {
 
     // --- Allocate buckets and compute global + per-morsel offsets
     inline void radix_prepare_buckets(
-        const std::vector<std::vector<size_t>> &morsel_bucket_counts,
+        const std::vector<std::vector<size_t> > &morsel_bucket_counts,
         size_t num_buckets,
         RadixPartitionResult &buckets,
-        std::vector<std::vector<size_t>> &morsel_bucket_offsets
+        std::vector<std::vector<size_t> > &morsel_bucket_offsets
     ) {
         // Total per bucket
         std::vector<size_t> bucket_totals(num_buckets, 0);
         for (size_t b = 0; b < num_buckets; ++b) {
-            for (auto &counts : morsel_bucket_counts) {
+            for (auto &counts: morsel_bucket_counts) {
                 bucket_totals[b] += counts[b];
             }
         }
@@ -204,30 +210,16 @@ namespace PartitionUtils {
     );
 
 
-
-
     // --- Single-column helpers (fast path) ---
     using SingleKeyIndexMap =
-        std::unordered_map<int32_t, IndexDataset>;
-
-    inline void process_row_1col(
-        const Dataset &dataset,
-        size_t row_idx,
-        size_t col_idx,
-        SingleKeyIndexMap &local_map
-    ) {
-        int32_t key = dataset[row_idx][col_idx];
-        auto &vec = local_map[key];
-        if (vec.empty()) vec.reserve(128);
-        vec.push_back(row_idx);
-    }
+    std::unordered_map<int32_t, IndexDataset>;
 
     inline void merge_maps_1col(
         SingleKeyIndexMap &global,
         std::vector<SingleKeyIndexMap> &thread_parts
     ) {
-        for (auto &tp : thread_parts) {
-            for (auto &kv : tp) {
+        for (auto &tp: thread_parts) {
+            for (auto &kv: tp) {
                 auto &dst = global[kv.first];
                 if (dst.empty()) dst.reserve(kv.second.size());
                 std::move(kv.second.begin(), kv.second.end(), std::back_inserter(dst));
@@ -267,5 +259,20 @@ namespace PartitionUtils {
         size_t num_threads = std::thread::hardware_concurrency(),
         size_t morsel_size = 2048,
         size_t radix_bits = 8 // used only for 1-col
+    );
+
+    // Optional simple 64-bit mixer (cheap, adequate)
+    static inline uint64_t mix64(uint64_t x) {
+        x ^= x >> 33; x *= 0xff51afd7ed558ccdULL;
+        x ^= x >> 33; x *= 0xc4ceb9fe1a85ec53ULL;
+        x ^= x >> 33; return x;
+    }
+
+    PartitionIndexResult
+    partition_dataset_hash_radix_sequential_multi(
+        const Dataset &dataset,
+        const FileSchema &schema,
+        const std::vector<std::string> &partition_columns,
+        size_t radix_bits /* e.g., 10 -> 1024 buckets */
     );
 }
