@@ -307,8 +307,8 @@ PartitionUtils::PartitionIndexResult PartitionUtils::partition_indices_parallel(
 
 }
 
-// Sequential hash-then-radix for multi-column int32 keys.
-// Returns: unordered_map<vector<int32_t>, IndexDataset, VecHash, VecEq>
+// This was used to showcase results in the paper for multi-column partitioning with radix hashing.
+// Otherwise not used in the main cache
 PartitionIndexResult
 PartitionUtils::partition_dataset_hash_radix_sequential_multi(
     const Dataset &dataset,

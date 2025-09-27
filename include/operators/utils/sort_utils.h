@@ -8,5 +8,6 @@
 
 class SortUtils {
 public:
-    static void sort_dataset(Dataset &data, const FileSchema &schema, const std::string &order_column, size_t parallel_threads = 0);
+    static void sort_dataset(Dataset &data, const FileSchema &schema, const size_t &order_idx, size_t parallel_threads = 0);
+    static void sort_dataset_indices(const Dataset &data, std::vector<size_t> &indices, const size_t &order_idx);
 };

@@ -23,14 +23,14 @@ public:
         std::cout << "=== Binary Window Function Benchmark Suite ===\n\n";
 
         // Test different scenarios
-        // test_few_large_partitions(); // A1
+        test_few_large_partitions(); // A1
         // test_many_small_partitions(); // A2
         // test_equal_partitions_and_rows(); // A3
         // test_less_partitions_in_probe(); // B1
         // test_less_partitions_in_input(); // B2
         // test_one_row_probe(); // C1
-        // test_A1_bigger_ranges(); // D1
-        // test_A1_very_small_ranges(); // D2
+        test_A1_bigger_ranges(); // D1
+        test_A1_very_small_ranges(); // D2
         test_multiple_partitioning_columns(); // E1
 
         std::cout << "\n=== Benchmark Complete ===\n";

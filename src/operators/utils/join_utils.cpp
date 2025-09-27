@@ -73,7 +73,7 @@ void JoinUtils::build_index(const Dataset& input, const FileSchema &schema, std:
 
 }
 
-void JoinUtils::build_index_from_vectors_segtree(const std::vector<double> &sorted_keys, const std::vector<double> &values) {
+void JoinUtils::build_index_from_vectors_segtree(const std::vector<uint32_t> &sorted_keys, const std::vector<uint32_t> &values) {
     n = sorted_keys.size();
     keys = sorted_keys; // copy
     // values must be same size
@@ -91,7 +91,7 @@ double JoinUtils::seg_query(size_t l, size_t r) const {
     return res;
 }
 
-void JoinUtils::build_index_from_vectors_segtree_top_down(const std::vector<double> &sorted_keys, const std::vector<double> &values) {
+void JoinUtils::build_index_from_vectors_segtree_top_down(const std::vector<uint32_t> &sorted_keys, const std::vector<uint32_t> &values) {
     n = sorted_keys.size();
     keys = sorted_keys; // copy
     segtree.assign(4 * n, 0.0); // allocate enough space for recursion
@@ -113,7 +113,7 @@ void JoinUtils::build_index_from_vectors_segtree_top_down(const std::vector<doub
 }
 
 double JoinUtils::seg_query_top_down(size_t ql, size_t qr) const {
-    std::function<double(size_t, size_t, size_t)> query = [&](size_t node, size_t l, size_t r) -> double {
+    std::function<uint32_t(size_t, size_t, size_t)> query = [&](size_t node, size_t l, size_t r) -> uint32_t {
         if (qr < l || ql > r) {
             return 0.0; // disjoint
         }
@@ -129,8 +129,8 @@ double JoinUtils::seg_query_top_down(size_t ql, size_t qr) const {
 }
 
 
-void JoinUtils::build_index_from_vectors_prefix_sums(const std::vector<double> &sorted_keys,
-                                         const std::vector<double> &values) {
+void JoinUtils::build_index_from_vectors_prefix_sums(const std::vector<uint32_t> &sorted_keys,
+                                         const std::vector<uint32_t> &values) {
     n = sorted_keys.size();
     keys = sorted_keys; // copy
 
@@ -145,8 +145,8 @@ double JoinUtils::prefix_sums_query(size_t l, size_t r) const {
     return prefix_sums[r] - prefix_sums[l];
 }
 
-void JoinUtils::build_index_from_vectors_sqrt_tree(const std::vector<double> &sorted_keys,
-                                         const std::vector<double> &vals) {
+void JoinUtils::build_index_from_vectors_sqrt_tree(const std::vector<uint32_t> &sorted_keys,
+                                         const std::vector<uint32_t> &vals) {
     n = sorted_keys.size();
     keys = sorted_keys;
     values = vals;
@@ -194,58 +194,58 @@ double JoinUtils::sqrt_query(size_t l, size_t r) const {
 }
 
 
-void JoinUtils::build_index_from_vectors_two_pointer_sweep(const std::vector<double> &sorted_keys,
-                                         const std::vector<double> &vals) {
+void JoinUtils::build_index_from_vectors_two_pointer_sweep(const std::vector<uint32_t> &sorted_keys,
+                                         const std::vector<uint32_t> &vals) {
     n = sorted_keys.size();
     keys = sorted_keys;
     values = vals;
 }
 
-std::vector<double> JoinUtils::sweep_query(
-    const std::vector<std::pair<double,double>> &probe_ranges  // [(start, end)]
-) const {
-    std::vector<double> results(probe_ranges.size());
-
-    // Indices into input
-    size_t lo_ptr = 0;
-    size_t hi_ptr = 0;
-    double running_sum = 0.0;
-
-    // Prepare: sort probes by start (but keep original index to restore order)
-    struct ProbeInfo {
-        double start, end;
-        size_t idx;
-    };
-    std::vector<ProbeInfo> sorted_probes;
-    sorted_probes.reserve(probe_ranges.size());
-    for (size_t i = 0; i < probe_ranges.size(); i++) {
-        sorted_probes.push_back({probe_ranges[i].first, probe_ranges[i].second, i});
-    }
-    std::sort(sorted_probes.begin(), sorted_probes.end(),
-              [](auto &a, auto &b){ return a.start < b.start; });
-
-    // Sweep input alongside probes
-    for (auto &pr : sorted_probes) {
-        double start = pr.start;
-        double end   = pr.end;
-
-        // advance lo_ptr to exclude old rows
-        while (lo_ptr < n && keys[lo_ptr] < start) {
-            running_sum -= values[lo_ptr];
-            lo_ptr++;
-        }
-
-        // advance hi_ptr to include new rows
-        while (hi_ptr < n && keys[hi_ptr] <= end) {
-            running_sum += values[hi_ptr];
-            hi_ptr++;
-        }
-
-        results[pr.idx] = running_sum;
-    }
-
-    return results;
-}
+// std::vector<uint32_t> JoinUtils::sweep_query(
+//     const std::vector<std::pair<uint32_t,uint32_t>> &probe_ranges  // [(start, end)]
+// ) const {
+//     std::vector<uint32_t> results(probe_ranges.size());
+//
+//     // Indices into input
+//     size_t lo_ptr = 0;
+//     size_t hi_ptr = 0;
+//     uint32_t running_sum = 0;
+//
+//     // Prepare: sort probes by start (but keep original index to restore order)
+//     struct ProbeInfo {
+//         double start, end;
+//         size_t idx;
+//     };
+//     std::vector<ProbeInfo> sorted_probes;
+//     sorted_probes.reserve(probe_ranges.size());
+//     for (size_t i = 0; i < probe_ranges.size(); i++) {
+//         sorted_probes.push_back({probe_ranges[i].first, probe_ranges[i].second, i});
+//     }
+//     std::sort(sorted_probes.begin(), sorted_probes.end(),
+//               [](auto &a, auto &b){ return a.start < b.start; });
+//
+//     // Sweep input alongside probes
+//     for (auto &pr : sorted_probes) {
+//         double start = pr.start;
+//         double end   = pr.end;
+//
+//         // advance lo_ptr to exclude old rows
+//         while (lo_ptr < n && keys[lo_ptr] < start) {
+//             running_sum -= values[lo_ptr];
+//             lo_ptr++;
+//         }
+//
+//         // advance hi_ptr to include new rows
+//         while (hi_ptr < n && keys[hi_ptr] <= end) {
+//             running_sum += values[hi_ptr];
+//             hi_ptr++;
+//         }
+//
+//         results[pr.idx] = running_sum;
+//     }
+//
+//     return results;
+// }
 
 
 

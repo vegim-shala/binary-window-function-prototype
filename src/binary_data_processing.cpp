@@ -14,8 +14,8 @@ using namespace std;
 int main() {
     cout << "START PROCESSING:" << endl;
 
-    auto [input, input_schema] = read_csv_optimized("many_partitioning_cols/input1.csv");
-    auto [probe, probe_schema] = read_csv_optimized("many_partitioning_cols/probe1.csv");
+    auto [input, input_schema] = read_csv_optimized("quick_test/input1.csv");
+    auto [probe, probe_schema] = read_csv_optimized("quick_test/probe1.csv");
     // verify_binary_file("dynamic_columns.bin");
     // auto [data, schema] = read_binary("sensor.bin");
 
@@ -26,8 +26,8 @@ int main() {
 
     BinaryWindowFunctionModel model;
     model.value_column = "value";
-    // model.partition_columns = {"category"}; // For one partitioning column
-    model.partition_columns = {"category1", "category2"}; // For many partitioning columns
+    model.partition_columns = {"category"}; // For one partitioning column
+    // model.partition_columns = {"category1", "category2"}; // For many partitioning columns
     model.order_column = "timestamp";
     model.output_column = "sum_result";
 

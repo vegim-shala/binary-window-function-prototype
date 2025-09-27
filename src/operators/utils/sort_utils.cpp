@@ -10,9 +10,6 @@
 #include "ips4o/ips4o.hpp"
 
 
-
-
-
 // Helper function for Radix Sort
 void counting_sort_by_digit(std::vector<DataRow> &data, std::vector<int> &keys, int exp) {
     std::vector<DataRow> output_data(data.size());
@@ -46,14 +43,12 @@ void counting_sort_by_digit(std::vector<DataRow> &data, std::vector<int> &keys, 
     keys = std::move(output_keys);
 }
 
-void radix_sort_rows(std::vector<DataRow> &data, const FileSchema &schema, std::string order_column) {
+void radix_sort_rows(std::vector<DataRow> &data, const FileSchema &schema, size_t &order_idx) {
     if (data.empty()) return;
 
     // 1. Extract keys and find the maximum value
     std::vector<int> keys;
     keys.reserve(data.size());
-
-    size_t order_idx  = schema.index_of(order_column);
 
     for (const auto &row: data) {
         keys.push_back(row[order_idx]);
@@ -66,12 +61,10 @@ void radix_sort_rows(std::vector<DataRow> &data, const FileSchema &schema, std::
     }
 }
 
-void counting_sort_rows(std::vector<DataRow> &data, const FileSchema &schema, std::string order_column) {
+void counting_sort_rows(std::vector<DataRow> &data, const FileSchema &schema, size_t &order_idx) {
     // 1. First, extract all the keys into a vector.
     std::vector<int> keys;
     keys.reserve(data.size());
-
-    size_t order_idx  = schema.index_of(order_column);
 
     for (const auto &row: data) {
         keys.push_back(row[order_idx]);
@@ -117,12 +110,11 @@ void counting_sort_rows(std::vector<DataRow> &data, const FileSchema &schema, st
  * @param data
  * @param order_column
  */
-void ips2ra_sort(Dataset &data, const FileSchema &schema,  const std::string &order_column) {
-  	size_t order_idx  = schema.index_of(order_column);
+void ips2ra_sort(Dataset &data, const FileSchema &schema, const size_t &order_idx) {
     ips2ra::sort(data.begin(), data.end(),
-                           [&](const DataRow &row) {
-                               return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
-                           });
+                 [&](const DataRow &row) {
+                     return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
+                 });
 };
 
 // ---------------------------    IPS2RA PARALLEL SORT    -------------------------------
@@ -132,18 +124,17 @@ void ips2ra_sort(Dataset &data, const FileSchema &schema,  const std::string &or
  * @param data
  * @param order_column
  */
-void ips2ra_parallel_sort(Dataset &data, const FileSchema &schema, const std::string &order_column, size_t threads) {
-    size_t order_idx  = schema.index_of(order_column);
+void ips2ra_parallel_sort(Dataset &data, const FileSchema &schema, const size_t &order_idx, size_t threads) {
     if (threads == 0) {
         ips2ra::parallel::sort(data.begin(), data.end(),
-            [&](const DataRow &row) {
-                return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
-            });
+                               [&](const DataRow &row) {
+                                   return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
+                               });
     } else {
         ips2ra::parallel::sort(data.begin(), data.end(),
-            [&](const DataRow &row) {
-                return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
-            }, threads);
+                               [&](const DataRow &row) {
+                                   return static_cast<uint32_t>(row[order_idx]) ^ (1UL << 31);
+                               }, threads);
     }
 }
 
@@ -154,8 +145,7 @@ void ips2ra_parallel_sort(Dataset &data, const FileSchema &schema, const std::st
  * @param data
  * @param order_column
  */
-void ips4o_sort(Dataset &data, const FileSchema &schema, const std::string &order_column) {
-  	size_t order_idx  = schema.index_of(order_column);
+void ips4o_sort(Dataset &data, const FileSchema &schema, const size_t &order_idx) {
     ips4o::sort(data.begin(), data.end(),
                 [&](const DataRow &a, const DataRow &b) {
                     return a[order_idx] < b[order_idx];
@@ -169,8 +159,7 @@ void ips4o_sort(Dataset &data, const FileSchema &schema, const std::string &orde
  * @param data
  * @param order_column
  */
-void ips4o_parallel_sort(Dataset &data, const FileSchema &schema, const std::string &order_column) {
-  	size_t order_idx  = schema.index_of(order_column);
+void ips4o_parallel_sort(Dataset &data, const FileSchema &schema, const size_t &order_idx) {
     ips4o::parallel::sort(
         data.begin(),
         data.end(),
@@ -181,10 +170,25 @@ void ips4o_parallel_sort(Dataset &data, const FileSchema &schema, const std::str
 };
 
 
-void SortUtils::sort_dataset(Dataset &data, const FileSchema &schema, const std::string &order_column, size_t parallel_threads) {
+void SortUtils::sort_dataset(Dataset &data, const FileSchema &schema, const size_t &order_idx,
+                             size_t parallel_threads) {
+    auto start = std::chrono::high_resolution_clock::now();
+
+    ips2ra_parallel_sort(data, schema, order_idx, parallel_threads);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
+}
+
+void SortUtils::sort_dataset_indices(const Dataset &data, std::vector<size_t> &indices, const size_t &order_idx) {
     // auto start = std::chrono::high_resolution_clock::now();
 
-    ips2ra_parallel_sort(data, schema, order_column, parallel_threads);
+    auto proj = [&](size_t idx) {
+        return static_cast<uint32_t>(data[idx][order_idx]) ^ (1UL << 31);
+    };
+
+    ips2ra::sort(indices.begin(), indices.end(), proj);
 
     // auto end = std::chrono::high_resolution_clock::now();
     // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);

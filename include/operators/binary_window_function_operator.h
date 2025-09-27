@@ -4,7 +4,9 @@
 #include <string>
 #include "aggregators/factory.h"
 #include "operators/utils/join_utils.h"
+#include "operators/utils/partition_utils.h"
 #include "data_io.h"
+#include "utils/thread_pool.h"
 
 struct BinaryWindowFunctionModel {
     std::string value_column;
@@ -24,18 +26,117 @@ public:
           join_utils(this->spec.join_spec, this->spec.order_column) {
     }
 
-    std::pair<Dataset, FileSchema> execute(Dataset& input, Dataset& probe, FileSchema input_schema, FileSchema probe_schema);
-    std::pair<Dataset, FileSchema> execute2(Dataset& input, Dataset& probe, FileSchema input_schema, FileSchema probe_schema);
-    std::pair<Dataset, FileSchema> execute3(Dataset& input, Dataset& probe, FileSchema input_schema, FileSchema probe_schema);
-    std::pair<Dataset, FileSchema> execute4(Dataset& input, Dataset& probe, FileSchema input_schema, FileSchema probe_schema);
+    std::pair<Dataset, FileSchema> execute(Dataset &input, Dataset &probe, FileSchema input_schema,
+                                           FileSchema probe_schema);
+
+    std::pair<Dataset, FileSchema> execute2(Dataset &input, Dataset &probe, FileSchema input_schema,
+                                            FileSchema probe_schema);
+
+    std::pair<Dataset, FileSchema> execute3(Dataset &input, Dataset &probe, FileSchema input_schema,
+                                            FileSchema probe_schema);
+
+    std::pair<Dataset, FileSchema> execute4(Dataset &input, Dataset &probe, FileSchema input_schema,
+                                            FileSchema probe_schema);
+
+    std::pair<Dataset, FileSchema> execute_sequential(
+        Dataset &input,
+        Dataset &probe,
+        FileSchema input_schema,
+        FileSchema probe_schema
+    );
 
 private:
     BinaryWindowFunctionModel spec;
     std::unique_ptr<Aggregator> aggregator;
     JoinUtils join_utils;
 
-    std::string extract_partition_key(const DataRow& row) const;
+    std::string extract_partition_key(const DataRow &row) const;
 
     Dataset probe_parallel(const Dataset &input_partition, const Dataset &probe_partition, const FileSchema &schema,
                            size_t num_threads);
+
+    std::vector<std::pair<PartitionUtils::IndexDataset, PartitionUtils::IndexDataset> > build_worklist(
+        auto &input_idx_partitions,
+        auto &probe_idx_partitions
+    );
+
+    void process_worklist(
+        std::vector<std::pair<PartitionUtils::IndexDataset, PartitionUtils::IndexDataset> > &worklist,
+        Dataset &input,
+        Dataset &probe,
+        FileSchema &input_schema,
+        FileSchema &probe_schema,
+        Dataset &result,
+        std::mutex &result_mtx,
+        ThreadPool &pool,
+        size_t batch_size,
+        size_t morsel_size
+    );
+
+    void process_partition(
+        PartitionUtils::IndexDataset in_indices,
+        PartitionUtils::IndexDataset pr_indices,
+        const Dataset &input,
+        const Dataset &probe,
+        const FileSchema &input_schema,
+        const FileSchema &probe_schema,
+        Dataset &result,
+        std::mutex &result_mtx,
+        ThreadPool &pool,
+        size_t morsel_size
+    ) const;
+
+    void process_probe_partition_parallel(
+        const PartitionUtils::IndexDataset &pr_indices,
+        const Dataset &probe,
+        const FileSchema &probe_schema,
+        const std::vector<uint32_t> &keys,
+        JoinUtils &local_join,
+        Dataset &result,
+        std::mutex &result_mtx,
+        ThreadPool &pool,
+        size_t morsel_size
+    ) const;
+
+    void process_probe_partition_inline(
+        const PartitionUtils::IndexDataset &pr_indices,
+        const Dataset &probe,
+        const FileSchema &probe_schema,
+        const std::vector<uint32_t> &keys,
+        JoinUtils &local_join,
+        Dataset &result,
+        std::mutex &result_mtx
+    ) const;
+
+    std::vector<DataRow> process_probe_morsel(
+        size_t mstart,
+        size_t mend,
+        const PartitionUtils::IndexDataset &pr_indices,
+        const Dataset &probe,
+        const FileSchema &probe_schema,
+        const std::vector<uint32_t> &keys,
+        JoinUtils &local_join
+    ) const;
+
+
+    // ------------------------ These functions are for sequential execution only ------------------------
+    void process_worklist_sequential(
+        std::vector<std::pair<PartitionUtils::IndexDataset, PartitionUtils::IndexDataset> > &worklist,
+        Dataset &input,
+        Dataset &probe,
+        FileSchema &input_schema,
+        FileSchema &probe_schema,
+        Dataset &result,
+        std::mutex &result_mtx // unused, but kept for signature symmetry
+    ) const;
+
+    void process_partition_sequential(
+        PartitionUtils::IndexDataset in_indices,
+        PartitionUtils::IndexDataset pr_indices,
+        const Dataset &input,
+        const Dataset &probe,
+        const FileSchema &input_schema,
+        const FileSchema &probe_schema,
+        Dataset &result
+    ) const;
 };
