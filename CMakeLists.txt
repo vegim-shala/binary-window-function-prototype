@@ -13,6 +13,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
 
 # Add this line to specify include directories
 include_directories(include)
+include_directories(/opt/homebrew/Cellar/boost/1.89.0/include)
 
 add_subdirectory(ips2ra)
 add_subdirectory(ips4o)

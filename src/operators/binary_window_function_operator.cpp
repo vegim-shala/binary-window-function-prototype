@@ -45,9 +45,9 @@ BinaryWindowFunctionOperator::build_worklist(
             if constexpr (std::is_same_v<std::decay_t<decltype(key)>, int32_t>) {
                 auto &input_map = std::get<std::unordered_map<int32_t, IndexDataset> >(input_idx_partitions);
                 auto it = input_map.find(key);
-                if (it != input_map.end()) {
+                if (it != input_map.end()) { // if the corresponding input partition exists, get its indices. Otherwise, we want to skip this probe partition.
                     in_inds = std::move(it->second);
-                }
+                } else continue;
             } else {
                 auto &input_map = std::get<
                     std::unordered_map<std::vector<int32_t>, IndexDataset,
@@ -159,6 +159,7 @@ void BinaryWindowFunctionOperator::process_partition(
     // }
 
     SortUtils::sort_dataset_indices(input, in_indices, order_idx);
+    // SortUtils::sort_dataset_global_keys(global_keys, in_indices);
 
     // auto start_building_index = std::chrono::high_resolution_clock::now();
     // 2. Build keys + values arrays
@@ -306,7 +307,7 @@ std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel(
         size_t lo = lo_it - keys.begin(); // the index of the first element >= start
         size_t hi = hi_it - keys.begin(); // the index of the first element > end
 
-        if (lo < hi) {
+        if (lo < hi) [[likely]] {
             // TODO: Check if we include lo == hi case (empty range), but if there's a row with exact match in the input, it should be included right?
             double agg_sum = local_join.seg_query(lo, hi);
             DataRow out = probe_row;
@@ -330,6 +331,21 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     std::mutex result_mtx;
 
     auto total_start = std::chrono::high_resolution_clock::now();
+
+    auto start_precompute = std::chrono::high_resolution_clock::now();
+
+    // Precompute global keys for ordering
+    global_keys.reserve(input.size());
+
+    const size_t order_idx = input_schema.index_of(spec.order_column);
+    for (size_t row_id = 0; row_id < input.size(); ++row_id) {
+        global_keys[row_id] = static_cast<uint32_t>(input[row_id][order_idx]) ^ (1UL << 31);
+    }
+
+    auto end_precompute = std::chrono::high_resolution_clock::now();
+    std::cout << "[SEQ] Precompute global keys wall time: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(end_precompute - start_precompute).count()
+            << " ms" << std::endl;
 
     // Stage 1: Pre-partition input and probe datasets
     auto part_start = std::chrono::high_resolution_clock::now();
@@ -411,6 +427,21 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute_sequential(
 
     auto total_start = std::chrono::high_resolution_clock::now();
 
+    auto start_precompute = std::chrono::high_resolution_clock::now();
+
+    // Precompute global keys for ordering
+    global_keys.reserve(input.size());
+
+    const size_t order_idx = input_schema.index_of(spec.order_column);
+    for (size_t row_id = 0; row_id < input.size(); ++row_id) {
+        global_keys[row_id] = static_cast<uint32_t>(input[row_id][order_idx]) ^ (1UL << 31);
+    }
+
+    auto end_precompute = std::chrono::high_resolution_clock::now();
+    std::cout << "[SEQ] Precompute global keys wall time: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(end_precompute - start_precompute).count()
+            << " ms" << std::endl;
+
     // Stage 1: Pre-partition input and probe datasets
     auto part_start = std::chrono::high_resolution_clock::now();
     auto input_idx_partitions = PartitionUtils::partition_indices_parallel(
@@ -491,11 +522,10 @@ void BinaryWindowFunctionOperator::process_partition_sequential(
     const FileSchema &probe_schema,
     Dataset &result
 ) const {
-    if (pr_indices.empty() || in_indices.empty()) return;
-
     // Stage 1: Sort input partition by order column
     const size_t order_idx = input_schema.index_of(spec.order_column);
     SortUtils::sort_dataset_indices(input, in_indices, order_idx);
+    // SortUtils::sort_dataset_global_keys(global_keys, in_indices);
 
     auto start_building_index = std::chrono::high_resolution_clock::now();
 
@@ -522,7 +552,7 @@ void BinaryWindowFunctionOperator::process_partition_sequential(
 
     auto start_partition_process = std::chrono::high_resolution_clock::now();
     // Stage 4: Probe partition sequentially
-    process_probe_partition_inline(pr_indices, probe, probe_schema,
+    process_probe_partition_inline_sequential(pr_indices, probe, probe_schema,
                                    keys, local_join, result,
                                    *(new std::mutex())); // dummy mutex, never contended
 
@@ -530,6 +560,43 @@ void BinaryWindowFunctionOperator::process_partition_sequential(
     auto duration_partition_process = std::chrono::duration_cast<std::chrono::milliseconds>(
         end_partition_process - start_partition_process);
     std::cout << "Time taken for PARTITION PROCESSING: " << duration_partition_process.count() << " ms" << std::endl;
+}
+
+void BinaryWindowFunctionOperator::process_probe_partition_inline_sequential(
+    const PartitionUtils::IndexDataset &pr_indices,
+    const Dataset &probe,
+    const FileSchema &probe_schema,
+    const std::vector<uint32_t> &keys,
+    JoinUtils &local_join,
+    Dataset &result,
+    std::mutex &result_mtx
+) const {
+    size_t old_size = result.size();
+    result.reserve(old_size + pr_indices.size()); // ensure enough space
+
+    size_t probe_begin_idx = probe_schema.index_of(spec.join_spec.begin_column);
+    size_t probe_end_idx   = probe_schema.index_of(spec.join_spec.end_column);
+
+    for (size_t j = 0; j < pr_indices.size(); ++j) {
+        size_t probe_idx = pr_indices[j];
+        const DataRow &probe_row = probe[probe_idx];
+
+        int32_t start = probe_row[probe_begin_idx];
+        int32_t end   = probe_row[probe_end_idx];
+
+        auto lo_it = std::lower_bound(keys.begin(), keys.end(), start);
+        auto hi_it = std::upper_bound(keys.begin(), keys.end(), end);
+
+        size_t lo = lo_it - keys.begin();
+        size_t hi = hi_it - keys.begin();
+
+        if (lo < hi) [[likely]] {
+            double agg_sum = local_join.seg_query(lo, hi);
+            DataRow out = probe_row;
+            out.push_back(agg_sum);
+            result.emplace_back(std::move(out));
+        }
+    }
 }
 
 

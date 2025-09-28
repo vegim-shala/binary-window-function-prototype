@@ -43,7 +43,7 @@ int main() {
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+    auto [result, new_schema] = op.execute_sequential(input, probe, input_schema, probe_schema);
 
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -52,7 +52,7 @@ int main() {
     print_dataset(result, new_schema, 100);
 
     cout << "Output: " << endl;
-    write_csv("many_partitioning_cols/output.csv", result, new_schema);
+    write_csv("quick_test/output.csv", result, new_schema);
 
     return 0;
 }

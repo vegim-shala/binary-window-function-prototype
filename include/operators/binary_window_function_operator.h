@@ -49,6 +49,7 @@ private:
     BinaryWindowFunctionModel spec;
     std::unique_ptr<Aggregator> aggregator;
     JoinUtils join_utils;
+    std::vector<uint32_t> global_keys;
 
     std::string extract_partition_key(const DataRow &row) const;
 
@@ -138,5 +139,15 @@ private:
         const FileSchema &input_schema,
         const FileSchema &probe_schema,
         Dataset &result
+    ) const;
+
+    void process_probe_partition_inline_sequential(
+        const PartitionUtils::IndexDataset &pr_indices,
+        const Dataset &probe,
+        const FileSchema &probe_schema,
+        const std::vector<uint32_t> &keys,
+        JoinUtils &local_join,
+        Dataset &result,
+        std::mutex &result_mtx
     ) const;
 };
