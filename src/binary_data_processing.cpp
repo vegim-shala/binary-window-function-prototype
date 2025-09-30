@@ -1,13 +1,10 @@
 #include "data_io.h"
 #include <vector>
-#include <fstream>
 #include <sstream>
 #include <iostream>
-#include "data_processing.h"
-#include <numeric>
 #include <operators/binary_window_function_operator.h>
+#include <operators/binary_window_function_operator2.h>
 #include <chrono>
-#include <cmath>
 
 using namespace std;
 
@@ -24,7 +21,9 @@ int main() {
     cout << "Probe: " << endl;
     print_dataset(probe, probe_schema, 100);
 
-    BinaryWindowFunctionModel model;
+    // BinaryWindowFunctionModel model;
+    BinaryWindowFunctionModel2 model;
+
     model.value_column = "value";
     model.partition_columns = {"category"}; // For one partitioning column
     // model.partition_columns = {"category1", "category2"}; // For many partitioning columns
@@ -32,18 +31,20 @@ int main() {
     model.output_column = "sum_result";
 
     // RANGE frame based on begin_col / end_col in the probe
-    model.join_spec = JoinSpec{
+    // model.join_spec = JoinSpec{
+    model.join_spec = JoinSpec2{
         .begin_column = "begin_col",
         .end_column = "end_col"
     };
 
     model.agg_type = AggregationType::SUM;
 
-    BinaryWindowFunctionOperator op(model);
+    // BinaryWindowFunctionOperator op(model);
+    BinaryWindowFunctionOperator2 op(model);
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    auto [result, new_schema] = op.execute_sequential(input, probe, input_schema, probe_schema);
+    auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
 
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -52,7 +53,7 @@ int main() {
     print_dataset(result, new_schema, 100);
 
     cout << "Output: " << endl;
-    write_csv("quick_test/output.csv", result, new_schema);
+    write_csv("official_duckdb_test/output.csv", result, new_schema);
 
     return 0;
 }

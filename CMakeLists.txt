@@ -29,8 +29,8 @@ set(COMMON_SOURCES src/data_io.cpp
 
 #add_executable(unary_prototype_csv src/data_processing.cpp
 #        ${COMMON_SOURCES})
-add_executable(binary_creator src/binary_creator.cpp
-        ${COMMON_SOURCES})
+#add_executable(binary_creator src/binary_creator.cpp
+#        ${COMMON_SOURCES})
 add_executable(binary_prototype_csv src/binary_data_processing.cpp
         ${COMMON_SOURCES})
 add_executable(sorting_tester src/sorting_tester.cpp

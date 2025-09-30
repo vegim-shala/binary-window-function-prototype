@@ -14,24 +14,25 @@ using namespace std;
 #include <string>
 #include <filesystem>
 #include <operators/binary_window_function_operator.h>
+#include <operators/binary_window_function_operator2.h>
 
 namespace fs = std::filesystem;
 
 class Benchmark {
 public:
-    void run_benchmarks() {
+    void run_benchmarks(int algo_ind) {
         std::cout << "=== Binary Window Function Benchmark Suite ===\n\n";
 
         // Test different scenarios
-        test_few_large_partitions(); // A1
-        // test_many_small_partitions(); // A2
-        // test_equal_partitions_and_rows(); // A3
-        // test_less_partitions_in_probe(); // B1
-        // test_less_partitions_in_input(); // B2
-        // test_one_row_probe(); // C1
-        test_A1_bigger_ranges(); // D1
-        test_A1_very_small_ranges(); // D2
-        test_multiple_partitioning_columns(); // E1
+        test_few_large_partitions(algo_ind); // A1
+        test_many_small_partitions(algo_ind); // A2
+        test_equal_partitions_and_rows(algo_ind); // A3
+        test_less_partitions_in_probe(algo_ind); // B1
+        test_less_partitions_in_input(algo_ind); // B2
+        test_one_row_probe(algo_ind); // C1
+        test_A1_bigger_ranges(algo_ind); // D1
+        test_A1_very_small_ranges(algo_ind); // D2
+        test_multiple_partitioning_columns(algo_ind); // E1
 
         std::cout << "\n=== Benchmark Complete ===\n";
     }
@@ -58,7 +59,27 @@ private:
         return model;
     }
 
-    void test_few_large_partitions() {
+    BinaryWindowFunctionModel2 create_test_model2(int num_partition_cols) {
+        BinaryWindowFunctionModel2 model;
+        model.value_column = "value";
+        model.partition_columns = {"category"};
+        if (num_partition_cols > 1) {
+            model.partition_columns = {"category1", "category2"};
+        }
+        model.order_column = "timestamp";
+        model.output_column = "sum_result";
+
+        // RANGE frame based on begin_col / end_col in the probe
+        model.join_spec = JoinSpec2{
+            .begin_column = "begin_col",
+            .end_column = "end_col"
+        };
+
+        model.agg_type = AggregationType::SUM;
+        return model;
+    }
+
+    void test_few_large_partitions(int algo_ind) {
         std::cout << "---------------------------------------------------------------------------------\n";
         std::cout << "A1. Scenario: Few Large Partitions\n";
 
@@ -75,16 +96,24 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model(1);
-            BinaryWindowFunctionOperator op(model);
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
 
-            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(1);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }
 
-    void test_many_small_partitions() {
+    void test_many_small_partitions(int algo_ind) {
         std::cout << "---------------------------------------------------------------------------------\n";
         std::cout << "A2. Scenario: Many Small Partitions\n";
 
@@ -101,16 +130,24 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model(1);
-            BinaryWindowFunctionOperator op(model);
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
 
-            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(1);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }
 
-    void test_equal_partitions_and_rows() {
+    void test_equal_partitions_and_rows(int algo_ind) {
         std::cout << "---------------------------------------------------------------------------------\n";
         std::cout << "A3. Scenario: Number of partitions and rows per partitions is equal\n";
 
@@ -127,16 +164,24 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model(1);
-            BinaryWindowFunctionOperator op(model);
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
 
-            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(1);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }
 
-    void test_less_partitions_in_probe() {
+    void test_less_partitions_in_probe(int algo_ind) {
         std::cout << "---------------------------------------------------------------------------------\n";
         std::cout << "B1. Scenario: Probe has fewer partitions than Input (same partition sizes)\n";
 
@@ -153,16 +198,24 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model(1);
-            BinaryWindowFunctionOperator op(model);
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
 
-            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(1);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }
 
-    void test_less_partitions_in_input() {
+    void test_less_partitions_in_input(int algo_ind) {
         std::cout << "---------------------------------------------------------------------------------\n";
         std::cout << "B2. Scenario: Input has fewer partitions than Probe (same partition sizes)\n";
 
@@ -179,16 +232,24 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model(1);
-            BinaryWindowFunctionOperator op(model);
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
 
-            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(1);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }
 
-    void test_one_row_probe() {
+    void test_one_row_probe(int algo_ind) {
         std::cout << "---------------------------------------------------------------------------------\n";
         std::cout << "C1. Scenario: Probe has only one row (checks for sensor/system logs)\n";
 
@@ -205,16 +266,24 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model(1);
-            BinaryWindowFunctionOperator op(model);
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
 
-            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(1);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }
 
-    void test_A1_bigger_ranges() {
+    void test_A1_bigger_ranges(int algo_ind) {
         std::cout << "---------------------------------------------------------------------------------\n";
         std::cout << "D1. Scenario: Testing for bigger ranges (same config as in A1))\n";
 
@@ -231,16 +300,24 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model(1);
-            BinaryWindowFunctionOperator op(model);
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
 
-            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(1);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }
 
-    void test_A1_very_small_ranges() {
+    void test_A1_very_small_ranges(int algo_ind) {
         std::cout << "---------------------------------------------------------------------------------\n";
         std::cout << "D2. Scenario: Testing for tiny ranges (allowing for duplicates in probe))\n";
 
@@ -257,16 +334,24 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model(1);
-            BinaryWindowFunctionOperator op(model);
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
 
-            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(1);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }
 
-    void test_multiple_partitioning_columns() {
+    void test_multiple_partitioning_columns(int algo_ind) {
         std::cout << "---------------------------------------------------------------------------------\n";
         std::cout << "E1. Scenario: A1 with multiple partitioning columns)\n";
 
@@ -283,10 +368,18 @@ private:
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
-            BinaryWindowFunctionModel model = create_test_model(2);
-            BinaryWindowFunctionOperator op(model);
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(2);
+                BinaryWindowFunctionOperator op(model);
 
-            auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(2);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
@@ -297,6 +390,7 @@ private:
 
 int main() {
     Benchmark benchmark;
-    benchmark.run_benchmarks();
+    benchmark.run_benchmarks(1);
+    // benchmark.run_benchmarks(2);
     return 0;
 }

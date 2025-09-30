@@ -332,20 +332,20 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
 
     auto total_start = std::chrono::high_resolution_clock::now();
 
-    auto start_precompute = std::chrono::high_resolution_clock::now();
-
-    // Precompute global keys for ordering
-    global_keys.reserve(input.size());
-
-    const size_t order_idx = input_schema.index_of(spec.order_column);
-    for (size_t row_id = 0; row_id < input.size(); ++row_id) {
-        global_keys[row_id] = static_cast<uint32_t>(input[row_id][order_idx]) ^ (1UL << 31);
-    }
-
-    auto end_precompute = std::chrono::high_resolution_clock::now();
-    std::cout << "[SEQ] Precompute global keys wall time: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(end_precompute - start_precompute).count()
-            << " ms" << std::endl;
+    // auto start_precompute = std::chrono::high_resolution_clock::now();
+    //
+    // // Precompute global keys for ordering
+    // global_keys.reserve(input.size());
+    //
+    // const size_t order_idx = input_schema.index_of(spec.order_column);
+    // for (size_t row_id = 0; row_id < input.size(); ++row_id) {
+    //     global_keys[row_id] = static_cast<uint32_t>(input[row_id][order_idx]) ^ (1UL << 31);
+    // }
+    //
+    // auto end_precompute = std::chrono::high_resolution_clock::now();
+    // std::cout << "[SEQ] Precompute global keys wall time: "
+    //         << std::chrono::duration_cast<std::chrono::milliseconds>(end_precompute - start_precompute).count()
+    //         << " ms" << std::endl;
 
     // Stage 1: Pre-partition input and probe datasets
     auto part_start = std::chrono::high_resolution_clock::now();
@@ -427,20 +427,20 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute_sequential(
 
     auto total_start = std::chrono::high_resolution_clock::now();
 
-    auto start_precompute = std::chrono::high_resolution_clock::now();
-
-    // Precompute global keys for ordering
-    global_keys.reserve(input.size());
-
-    const size_t order_idx = input_schema.index_of(spec.order_column);
-    for (size_t row_id = 0; row_id < input.size(); ++row_id) {
-        global_keys[row_id] = static_cast<uint32_t>(input[row_id][order_idx]) ^ (1UL << 31);
-    }
-
-    auto end_precompute = std::chrono::high_resolution_clock::now();
-    std::cout << "[SEQ] Precompute global keys wall time: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(end_precompute - start_precompute).count()
-            << " ms" << std::endl;
+    // auto start_precompute = std::chrono::high_resolution_clock::now();
+    //
+    // // Precompute global keys for ordering
+    // global_keys.reserve(input.size());
+    //
+    // const size_t order_idx = input_schema.index_of(spec.order_column);
+    // for (size_t row_id = 0; row_id < input.size(); ++row_id) {
+    //     global_keys[row_id] = static_cast<uint32_t>(input[row_id][order_idx]) ^ (1UL << 31);
+    // }
+    //
+    // auto end_precompute = std::chrono::high_resolution_clock::now();
+    // std::cout << "[SEQ] Precompute global keys wall time: "
+    //         << std::chrono::duration_cast<std::chrono::milliseconds>(end_precompute - start_precompute).count()
+    //         << " ms" << std::endl;
 
     // Stage 1: Pre-partition input and probe datasets
     auto part_start = std::chrono::high_resolution_clock::now();
