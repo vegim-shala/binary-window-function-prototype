@@ -21,8 +21,8 @@ int main() {
     cout << "Probe: " << endl;
     print_dataset(probe, probe_schema, 100);
 
-    // BinaryWindowFunctionModel model;
-    BinaryWindowFunctionModel2 model;
+    BinaryWindowFunctionModel model;
+    // BinaryWindowFunctionModel2 model;
 
     model.value_column = "value";
     model.partition_columns = {"category"}; // For one partitioning column
@@ -31,16 +31,16 @@ int main() {
     model.output_column = "sum_result";
 
     // RANGE frame based on begin_col / end_col in the probe
-    // model.join_spec = JoinSpec{
-    model.join_spec = JoinSpec2{
+    model.join_spec = JoinSpec{
+    // model.join_spec = JoinSpec2{
         .begin_column = "begin_col",
         .end_column = "end_col"
     };
 
     model.agg_type = AggregationType::SUM;
 
-    // BinaryWindowFunctionOperator op(model);
-    BinaryWindowFunctionOperator2 op(model);
+    BinaryWindowFunctionOperator op(model);
+    // BinaryWindowFunctionOperator2 op(model);
 
     auto start = std::chrono::high_resolution_clock::now();
 

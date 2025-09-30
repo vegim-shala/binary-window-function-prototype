@@ -183,7 +183,7 @@ void SortUtils::sort_dataset(Dataset &data, const FileSchema &schema, const size
 
 
 void SortUtils::sort_dataset_indices(const Dataset &data, std::vector<size_t> &indices, const size_t &order_idx) {
-    // auto start = std::chrono::high_resolution_clock::now();
+    auto start = std::chrono::high_resolution_clock::now();
 
     // auto proj = [&](size_t idx) {
     //     return static_cast<uint32_t>(data[idx][order_idx]) ^ (1UL << 31);
@@ -224,9 +224,9 @@ void SortUtils::sort_dataset_indices(const Dataset &data, std::vector<size_t> &i
     }
 
     //
-    // auto end = std::chrono::high_resolution_clock::now();
-    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    // std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
 }
 
 

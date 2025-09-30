@@ -161,7 +161,7 @@ void BinaryWindowFunctionOperator::process_partition(
     SortUtils::sort_dataset_indices(input, in_indices, order_idx);
     // SortUtils::sort_dataset_global_keys(global_keys, in_indices);
 
-    // auto start_building_index = std::chrono::high_resolution_clock::now();
+    auto start_building_index = std::chrono::high_resolution_clock::now();
     // 2. Build keys + values arrays
     const size_t value_idx = input_schema.index_of(spec.value_column);
 
@@ -179,12 +179,12 @@ void BinaryWindowFunctionOperator::process_partition(
     JoinUtils local_join(spec.join_spec, spec.order_column);
     local_join.build_index_from_vectors_segtree(keys, values);
 
-    // auto end_building_index = std::chrono::high_resolution_clock::now();
-    // auto duration_building_index = std::chrono::duration_cast<std::chrono::milliseconds>(
-    //     end_building_index - start_building_index);
-    // std::cout << "Time taken for BUILDING INDEX: " << duration_building_index.count() << " ms" << std::endl;
+    auto end_building_index = std::chrono::high_resolution_clock::now();
+    auto duration_building_index = std::chrono::duration_cast<std::chrono::milliseconds>(
+        end_building_index - start_building_index);
+    std::cout << "Time taken for BUILDING INDEX: " << duration_building_index.count() << " ms" << std::endl;
 
-    // auto start_partition_processing = std::chrono::high_resolution_clock::now();
+    auto start_partition_processing = std::chrono::high_resolution_clock::now();
 
     // 4. Probe partition (parallel or inline)
     if (pr_indices.size() >= morsel_size * 2) {
@@ -196,10 +196,10 @@ void BinaryWindowFunctionOperator::process_partition(
                                        keys, local_join, result, result_mtx);
     }
 
-    // auto end_partition_processing = std::chrono::high_resolution_clock::now();
-    // auto duration_partition_processing = std::chrono::duration_cast<std::chrono::milliseconds>(
-    //     end_partition_processing - start_partition_processing);
-    // std::cout << "Time taken for PARTITION PROCESSING: " << duration_partition_processing.count() << " ms" << std::endl;
+    auto end_partition_processing = std::chrono::high_resolution_clock::now();
+    auto duration_partition_processing = std::chrono::duration_cast<std::chrono::milliseconds>(
+        end_partition_processing - start_partition_processing);
+    std::cout << "Time taken for PARTITION PROCESSING: " << duration_partition_processing.count() << " ms" << std::endl;
 }
 
 /**
@@ -309,7 +309,8 @@ std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel(
 
         if (lo < hi) [[likely]] {
             // TODO: Check if we include lo == hi case (empty range), but if there's a row with exact match in the input, it should be included right?
-            double agg_sum = local_join.seg_query(lo, hi);
+            uint64_t agg_sum = local_join.seg_query(lo, hi);
+            // double agg_sum = local_join.seg_query(lo, hi);
             DataRow out = probe_row;
             out.push_back(agg_sum);
             local_out.emplace_back(std::move(out));
@@ -591,7 +592,7 @@ void BinaryWindowFunctionOperator::process_probe_partition_inline_sequential(
         size_t hi = hi_it - keys.begin();
 
         if (lo < hi) [[likely]] {
-            double agg_sum = local_join.seg_query(lo, hi);
+            uint64_t agg_sum = local_join.seg_query(lo, hi);
             DataRow out = probe_row;
             out.push_back(agg_sum);
             result.emplace_back(std::move(out));

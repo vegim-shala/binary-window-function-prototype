@@ -5,6 +5,7 @@
 #pragma once
 
 #include "data_io.h"
+#include "thread_pool.h"
 
 enum class JoinType { RANGE, ROWS };
 
@@ -17,31 +18,35 @@ struct JoinSpec {
 class JoinUtils {
 public:
     explicit JoinUtils(const JoinSpec &join_spec, const std::string &order_column)
-          : join_spec(join_spec), order_column(order_column) {}
+        : join_spec(join_spec), order_column(order_column) {
+    }
 
-    void pretty_print_segment_tree() const;
+    void build_index(const Dataset &input, const FileSchema &schema, std::string &value_column);
 
-    void build_index(const Dataset& input, const FileSchema &schema, std::string& value_column);
-    void build_index_from_vectors_segtree(const std::vector<uint32_t> &sorted_keys, const std::vector<uint32_t> &values);
-    void build_index_from_vectors_prefix_sums(const std::vector<uint32_t> &sorted_keys, const std::vector<uint32_t> &values);
-    void build_index_from_vectors_sqrt_tree(const std::vector<uint32_t> &sorted_keys, const std::vector<uint32_t> &values);
-    void build_index_from_vectors_two_pointer_sweep(const std::vector<uint32_t> &sorted_keys, const std::vector<uint32_t> &values);
+    void build_index_from_vectors_segtree(const std::vector<uint32_t> &sorted_keys,
+                                          const std::vector<uint32_t> &values);
 
-    std::vector<uint32_t> sweep_query(const std::vector<std::pair<uint32_t, uint32_t>> &probe_ranges) const;
+    // void build_index_from_vectors_segtree_parallel(const std::vector<uint32_t>& sorted_keys, const std::vector<uint32_t>& values,
+    //                                                           ThreadPool& pool);
 
-    // New: Direct SUM computation via binary search + segment tree
-    double compute_sum_range(const Dataset& input, const FileSchema &schema, const DataRow& probe_row,
-                             const std::string& start_col, const std::string& end_col) const;
+    void build_index_from_vectors_prefix_sums(const std::vector<uint32_t> &sorted_keys,
+                                              const std::vector<uint32_t> &values);
+
+    void build_index_from_vectors_sqrt_tree(const std::vector<uint32_t> &sorted_keys,
+                                            const std::vector<uint32_t> &values);
+
+    void build_index_from_vectors_two_pointer_sweep(const std::vector<uint32_t> &sorted_keys,
+                                                    const std::vector<uint32_t> &values);
 
 
-    std::vector<size_t> compute_range_join(
-        const Dataset& input, const FileSchema &schema, const DataRow& probe_row,
-        const std::string& begin_col, const std::string& end_col) const;
-
-    std::vector<size_t> compute_join(const Dataset& input, const FileSchema &schema, const DataRow& probe_row) const;
-
-    void validate() const;
-    double seg_query(size_t l, size_t r) const;
+    inline uint64_t JoinUtils::seg_query(size_t l, size_t r) const {
+        uint64_t res = 0;
+        for (l += n, r += n; l < r; l >>= 1, r >>= 1) {
+            if (l & 1) res += segtree[l++];
+            if (r & 1) res += segtree[--r];
+        }
+        return res;
+    }
 
     void build_index_from_vectors_segtree_top_down(const std::vector<uint32_t> &sorted_keys,
                                                    const std::vector<uint32_t> &values);
@@ -49,6 +54,7 @@ public:
     double seg_query_top_down(size_t ql, size_t qr) const;
 
     double prefix_sums_query(size_t l, size_t r) const;
+
     double sqrt_query(size_t l, size_t r) const;
 
 private:
@@ -56,17 +62,15 @@ private:
     const std::string order_column;
 
     // For Segment Tree
-    std::vector<uint32_t> keys;    // sorted order column values
-    std::vector<uint32_t> segtree; // flat segment tree storing sums
+    size_t n = 0;
+    std::vector<uint32_t> keys; // sorted probe/build keys
+    std::vector<uint64_t> segtree; // 1..(2n-1) used (0 unused)
 
     // For Prefix Sums
     std::vector<uint32_t> prefix_sums;
 
     // For SQRT Tree
-    std::vector<uint32_t> values;       // store raw values
-    std::vector<uint32_t> block_sums;   // sums per block
+    std::vector<uint32_t> values; // store raw values
+    std::vector<uint32_t> block_sums; // sums per block
     size_t block_size = 0;
-    size_t n = 0;                // number of elements
-
-
 };
