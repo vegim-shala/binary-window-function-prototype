@@ -119,6 +119,15 @@ private:
         JoinUtils &local_join
     ) const;
 
+    std::vector<DataRow> process_probe_morsel_sort_probe(
+        size_t mstart,
+        size_t mend,
+        const PartitionUtils::IndexDataset &pr_indices,
+        const Dataset &probe,
+        const FileSchema &probe_schema,
+        const std::vector<uint32_t> &keys,
+        JoinUtils &local_join
+    ) const;
 
     // ------------------------ These functions are for sequential execution only ------------------------
     void process_worklist_sequential(
@@ -150,4 +159,11 @@ private:
         Dataset &result,
         std::mutex &result_mtx
     ) const;
+
+    struct ProbeTask {
+        size_t orig_pos; // local position in [mstart..mend)
+        size_t probe_idx; // index into probe dataset
+        int32_t start;
+        int32_t end;
+    };
 };

@@ -207,26 +207,38 @@ void SortUtils::sort_dataset_indices(const Dataset &data, std::vector<size_t> &i
     // // std::cout << "DEBUG: Sort completed successfully" << std::endl;
     //
 
+#ifdef NDEBUG
+    // ---------- FAST PATH (Release build) ----------
     std::vector<std::pair<uint32_t, size_t>> pairs;
     pairs.reserve(indices.size());
-    for (unsigned long row_id : indices) {
+
+    for (size_t row_id : indices) {
         uint32_t key = static_cast<uint32_t>(data[row_id][order_idx]) ^ (1UL << 31);
-        pairs.emplace_back(key, row_id); // store both
+        pairs.emplace_back(key, row_id);
     }
 
-    // Sort by the first (key) only
+    // Sort by key only
     ips2ra::sort(pairs.begin(), pairs.end(),
                  [](const auto &p) { return p.first; });
 
-    // Write back row_ids
+    // Write back sorted row_ids
     for (size_t i = 0; i < indices.size(); ++i) {
         indices[i] = pairs[i].second;
     }
 
+#else
+    std::sort(indices.begin(), indices.end(),
+              [&](size_t lhs, size_t rhs) {
+                  uint32_t key_lhs = static_cast<uint32_t>(data[lhs][order_idx]) ^ (1UL << 31);
+                  uint32_t key_rhs = static_cast<uint32_t>(data[rhs][order_idx]) ^ (1UL << 31);
+                  return key_lhs < key_rhs;
+              });
+#endif
+
     //
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
+    // auto end = std::chrono::high_resolution_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    // std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
 }
 
 

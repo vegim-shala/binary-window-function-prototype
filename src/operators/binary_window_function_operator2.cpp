@@ -143,7 +143,7 @@ void BinaryWindowFunctionOperator2::process_partition(
 
     // Build segment tree (unchanged API)
     JoinUtils2 local_join(spec.join_spec, spec.order_column);
-    local_join.build_index_from_vectors_segtree(keys, values);
+    local_join.build_index_from_vectors_prefix_sums(keys, values);
 
     // Probe path unchanged (morsel or inline)
     if (pr_indices.size() >= morsel_size * 2) {

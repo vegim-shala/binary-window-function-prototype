@@ -45,7 +45,8 @@ BinaryWindowFunctionOperator::build_worklist(
             if constexpr (std::is_same_v<std::decay_t<decltype(key)>, int32_t>) {
                 auto &input_map = std::get<std::unordered_map<int32_t, IndexDataset> >(input_idx_partitions);
                 auto it = input_map.find(key);
-                if (it != input_map.end()) { // if the corresponding input partition exists, get its indices. Otherwise, we want to skip this probe partition.
+                if (it != input_map.end()) {
+                    // if the corresponding input partition exists, get its indices. Otherwise, we want to skip this probe partition.
                     in_inds = std::move(it->second);
                 } else continue;
             } else {
@@ -159,7 +160,6 @@ void BinaryWindowFunctionOperator::process_partition(
     // }
 
     SortUtils::sort_dataset_indices(input, in_indices, order_idx);
-    // SortUtils::sort_dataset_global_keys(global_keys, in_indices);
 
     auto start_building_index = std::chrono::high_resolution_clock::now();
     // 2. Build keys + values arrays
@@ -177,12 +177,16 @@ void BinaryWindowFunctionOperator::process_partition(
 
     // 3. Build segment tree
     JoinUtils local_join(spec.join_spec, spec.order_column);
-    local_join.build_index_from_vectors_segtree(keys, values);
+    // local_join.build_index_from_vectors_segtree(keys, values);
+    local_join.build_index_from_vectors_prefix_sums(keys, values);
+    // local_join.build_index_from_vectors_sqrttree(keys, values);
 
-    auto end_building_index = std::chrono::high_resolution_clock::now();
-    auto duration_building_index = std::chrono::duration_cast<std::chrono::milliseconds>(
-        end_building_index - start_building_index);
-    std::cout << "Time taken for BUILDING INDEX: " << duration_building_index.count() << " ms" << std::endl;
+    local_join.build_eytzinger();
+
+    // auto end_building_index = std::chrono::high_resolution_clock::now();
+    // auto duration_building_index = std::chrono::duration_cast<std::chrono::microseconds>(
+    //     end_building_index - start_building_index);
+    // std::cout << "Time taken for BUILDING INDEX: " << duration_building_index.count() << " ms" << std::endl;
 
     auto start_partition_processing = std::chrono::high_resolution_clock::now();
 
@@ -197,7 +201,7 @@ void BinaryWindowFunctionOperator::process_partition(
     }
 
     auto end_partition_processing = std::chrono::high_resolution_clock::now();
-    auto duration_partition_processing = std::chrono::duration_cast<std::chrono::milliseconds>(
+    auto duration_partition_processing = std::chrono::duration_cast<std::chrono::microseconds>(
         end_partition_processing - start_partition_processing);
     std::cout << "Time taken for PARTITION PROCESSING: " << duration_partition_processing.count() << " ms" << std::endl;
 }
@@ -224,11 +228,9 @@ void BinaryWindowFunctionOperator::process_probe_partition_parallel(
         size_t mend = std::min(mstart + morsel_size, pr_indices.size());
 
         futs.emplace_back(pool.submit(
-            // we use the pool because we also use it for partition batches -> Q1 : hoes does the pool actually handle that
-            [this, mstart, mend, &pr_indices, &probe, &probe_schema,
-                &keys, &local_join]() -> std::vector<DataRow> {
-                return process_probe_morsel(mstart, mend, pr_indices, probe, probe_schema,
-                                            keys, local_join);
+            [this, mstart, mend, &pr_indices, &probe, &probe_schema, &keys, &local_join]() mutable {
+                return process_probe_morsel_sort_probe(mstart, mend, pr_indices, probe, probe_schema,
+                                                       keys, local_join);
             }));
     }
 
@@ -254,9 +256,9 @@ void BinaryWindowFunctionOperator::process_probe_partition_inline(
     Dataset &result,
     std::mutex &result_mtx
 ) const {
-    auto local_out = process_probe_morsel(0, pr_indices.size(),
-                                          pr_indices, probe, probe_schema,
-                                          keys, local_join);
+    auto local_out = process_probe_morsel_sort_probe(0, pr_indices.size(),
+                                                     pr_indices, probe, probe_schema,
+                                                     keys, local_join);
     std::lock_guard<std::mutex> lk(result_mtx); // we lock because we process batches in parallel
     // TODO: Can we somehow make this lock-free?
     std::move(local_out.begin(), local_out.end(), std::back_inserter(result));
@@ -302,15 +304,19 @@ std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel(
         int32_t end = probe_row[probe_end_idx];
 
         auto lo_it = std::lower_bound(keys.begin(), keys.end(), start);
-        // lower_bound calculates the first element >= start.
+        // // lower_bound calculates the first element >= start.
         auto hi_it = std::upper_bound(keys.begin(), keys.end(), end); // upper_bound calculates the first element > end.
         size_t lo = lo_it - keys.begin(); // the index of the first element >= start
         size_t hi = hi_it - keys.begin(); // the index of the first element > end
 
+        // size_t lo = local_join.eyt_lower(start);
+        // size_t hi = local_join.eyt_upper(end);
+
         if (lo < hi) [[likely]] {
             // TODO: Check if we include lo == hi case (empty range), but if there's a row with exact match in the input, it should be included right?
-            uint64_t agg_sum = local_join.seg_query(lo, hi);
-            // double agg_sum = local_join.seg_query(lo, hi);
+            // uint64_t agg_sum = local_join.seg_query(lo, hi);
+            uint64_t agg_sum = local_join.prefix_sums_query(lo, hi);
+            // uint64_t agg_sum = local_join.sqrt_query(lo, hi);
             DataRow out = probe_row;
             out.push_back(agg_sum);
             local_out.emplace_back(std::move(out));
@@ -319,6 +325,216 @@ std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel(
     return local_out;
 }
 
+
+std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel_sort_probe(
+    size_t mstart,
+    size_t mend,
+    const PartitionUtils::IndexDataset &pr_indices,
+    const Dataset &probe,
+    const FileSchema &probe_schema,
+    const std::vector<uint32_t> &keys,
+    JoinUtils &local_join
+) const {
+    auto start_prepare_tasks = std::chrono::high_resolution_clock::now();
+    // ---- 1. Prepare probe tasks ----
+    std::vector<ProbeTask> tasks;
+    tasks.reserve(mend - mstart);
+
+    size_t probe_begin_idx = probe_schema.index_of(spec.join_spec.begin_column);
+    size_t probe_end_idx = probe_schema.index_of(spec.join_spec.end_column);
+
+    for (size_t j = mstart; j < mend; ++j) {
+        size_t probe_idx = pr_indices[j];
+        const DataRow &probe_row = probe[probe_idx];
+
+        ProbeTask t;
+        t.orig_pos = j - mstart; // keep local order
+        t.probe_idx = probe_idx;
+        t.start = probe_row[probe_begin_idx];
+        t.end = probe_row[probe_end_idx];
+        tasks.emplace_back(t);
+    }
+
+    // auto end_prepare_tasks = std::chrono::high_resolution_clock::now();
+    // auto duration_prepare_tasks = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    //     end_prepare_tasks - start_prepare_tasks);
+    // std::cout << "Time taken for PREPARING TASKS: " << duration_prepare_tasks.count() << " ns" << std::endl;
+
+    auto start_sorting_tasks = std::chrono::high_resolution_clock::now();
+
+    // ---- 2. Sort tasks by start (cache-friendly probing order) ----
+#ifdef NDEBUG
+    // ---------- FAST PATH (Release build with ips2ra) ----------
+    ips2ra::sort(tasks.begin(), tasks.end(),
+                 [](const ProbeTask &t) {
+                     return static_cast<uint32_t>(t.start) ^ (1UL << 31);
+                 });
+#else
+    // ---------- SAFE PATH (Debug build with std::sort) ----------
+    std::sort(tasks.begin(), tasks.end(),
+              [](const ProbeTask &lhs, const ProbeTask &rhs) {
+                  uint32_t key_lhs = static_cast<uint32_t>(lhs.start) ^ (1UL << 31);
+                  uint32_t key_rhs = static_cast<uint32_t>(rhs.start) ^ (1UL << 31);
+                  return key_lhs < key_rhs;
+              });
+#endif
+
+    // auto end_sorting_tasks = std::chrono::high_resolution_clock::now();
+    // auto duration_sorting_tasks = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    //     end_sorting_tasks - start_sorting_tasks);
+    // std::cout << "Time taken for SORTING TASKS: " << duration_sorting_tasks.count() << " ns" << std::endl;
+
+    auto start_probing = std::chrono::high_resolution_clock::now();
+
+    // ---- 3. Probe in sorted order ----
+    std::vector<uint64_t> agg(mend - mstart); // results in original local order
+    // JoinUtils::RangeCache cache; // thread-local cache
+
+    // auto gallop_forward = [&](size_t pos, uint32_t target, bool upper) {
+    //     // Exponential search forward from pos, then binary refine.
+    //     // Precondition for lower: keys[pos] < target (we need >= target).
+    //     // Precondition for upper: keys[pos] <= target (we need > target).
+    //     size_t n = keys.size();
+    //     size_t cur = pos;
+    //     size_t step = 1;
+    //
+    //     if (upper) {
+    //         // find first index > target
+    //         while (cur + step < n && keys[cur + step] <= target) {
+    //             cur += step;
+    //             step <<= 1;
+    //         }
+    //         size_t left = cur + 1;
+    //         size_t right = std::min(n, cur + step + 1);
+    //         return std::upper_bound(keys.begin() + left, keys.begin() + right, target) - keys.begin();
+    //         // return local_join.eyt_upper(target);
+    //     } else {
+    //         // find first index >= target
+    //         while (cur + step < n && keys[cur + step] < target) {
+    //             cur += step;
+    //             step <<= 1;
+    //         }
+    //         size_t left = cur + 1;
+    //         size_t right = std::min(n, cur + step + 1);
+    //         return std::lower_bound(keys.begin() + left, keys.begin() + right, target) - keys.begin();
+    //         // return local_join.eyt_lower(target);
+    //     }
+    // };
+
+    size_t lo = 0, hi = 0;
+    int32_t prev_start = std::numeric_limits<int32_t>::min();
+    int32_t prev_end   = std::numeric_limits<int32_t>::min();
+
+    for (size_t i = 0; i < tasks.size(); i++) {
+        const auto &task = tasks[i];
+
+        if (i == 0) {
+            // First probe → regular Eytzinger search
+            lo = local_join.eyt_lower(task.start);
+            hi = local_join.eyt_upper(task.end);
+        } else {
+            // Advance lo only forward
+            if (task.start > prev_start) {
+                lo = local_join.eyt_gallop_lower(lo, task.start);
+            }
+            // else { // we don't move lo backwards
+            //     // range shrank → bounded refine
+            //     lo = local_join.bounded_lower_bound(lo, hi, task.start);
+            // }
+
+            // Advance hi
+            if (task.end >= prev_end) {
+                hi = local_join.eyt_gallop_upper(hi, task.end);
+            } else {
+                // range shrank → bounded refine
+                hi = local_join.bounded_upper_bound(lo, hi, task.end);
+            }
+        }
+
+        uint64_t sum = 0;
+        if (lo < hi) {
+            sum = local_join.prefix_sums_query(lo, hi);
+            // or seg_query(lo, hi) / sqrt_query(lo, hi)
+        }
+
+        agg[task.orig_pos] = sum;
+        prev_start = task.start;
+        prev_end   = task.end;
+    }
+
+    // for (const auto &task: tasks) {
+    //     // size_t lo = local_join.branchless_lower_bound(keys, task.start);
+    //     // size_t hi = local_join.branchless_upper_bound(keys, task.end);
+    //
+    //     // size_t lo = local_join.eyt_lower(task.start);
+    //     // size_t hi = local_join.eyt_upper(task.end);
+    //
+    //     // size_t lo = local_join.bucket_lower(task.start);
+    //     // size_t hi = local_join.bucket_upper(task.end);
+    //
+    //     // advance lo until keys[lo] >= task.start
+    //     // while (lo < nkeys && keys[lo] < task.start) {
+    //     //     lo++;
+    //     // }
+    //     // // advance hi until keys[hi] > task.end
+    //     // while (hi < nkeys && keys[hi] <= task.end) {
+    //     //     hi++;
+    //     // }
+    //
+    //     auto lo_it = std::lower_bound(keys.begin(), keys.end(), task.start);
+    //     // // lower_bound calculates the first element >= start.
+    //     auto hi_it = std::upper_bound(keys.begin(), keys.end(), task.end);
+    //     // upper_bound calculates the first element > end.
+    //     size_t lo = lo_it - keys.begin(); // the index of the first element >= start
+    //     size_t hi = hi_it - keys.begin(); // the index of the first element > end
+    //
+    //     uint64_t sum = 0;
+    //     if (lo < hi) {
+    //         // if (!cache.lookup(lo, hi, sum)) {
+    //         //     sum = local_join.seg_query(lo, hi);
+    //         //     cache.insert(lo, hi, sum);
+    //         // }
+    //         // auto start_query = std::chrono::high_resolution_clock::now();
+    //         // sum = local_join.seg_query(lo, hi);
+    //         sum = local_join.prefix_sums_query(lo, hi);
+    //         // sum = local_join.sqrt_query(lo, hi);
+    //
+    //         // auto end_query = std::chrono::high_resolution_clock::now();
+    //         // auto duration_query = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    //         //     end_query - start_query);
+    //         // std::cout << "Time taken for one QUERY: " << duration_query.count() << " ns" << std::endl;
+    //     }
+    //
+    //     agg[task.orig_pos] = sum; // scatter back to original order
+    // }
+
+    // auto end_probing = std::chrono::high_resolution_clock::now();
+    // auto duration_probing = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    //     end_probing - start_probing);
+    // std::cout << "Time taken for PROBING: " << duration_probing.count() << " ns" << std::endl;290097
+
+    auto start_assembling = std::chrono::high_resolution_clock::now();
+
+    // ---- 4. Assemble DataRows in original order ----
+    std::vector<DataRow> local_out;
+    local_out.reserve(mend - mstart);
+
+    for (size_t j = mstart; j < mend; ++j) {
+        size_t probe_idx = pr_indices[j];
+        const DataRow &probe_row = probe[probe_idx];
+
+        DataRow out = probe_row;
+        out.push_back(agg[j - mstart]);
+        local_out.emplace_back(std::move(out));
+    }
+
+    // auto end_assembling = std::chrono::high_resolution_clock::now();
+    // auto duration_assembling = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    //     end_assembling - start_assembling);
+    // std::cout << "Time taken for ASSEMBLING: " << duration_assembling.count() << " ns" << std::endl;
+
+    return local_out;
+}
 
 pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     Dataset &input,
@@ -333,34 +549,22 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
 
     auto total_start = std::chrono::high_resolution_clock::now();
 
-    // auto start_precompute = std::chrono::high_resolution_clock::now();
-    //
-    // // Precompute global keys for ordering
-    // global_keys.reserve(input.size());
-    //
-    // const size_t order_idx = input_schema.index_of(spec.order_column);
-    // for (size_t row_id = 0; row_id < input.size(); ++row_id) {
-    //     global_keys[row_id] = static_cast<uint32_t>(input[row_id][order_idx]) ^ (1UL << 31);
-    // }
-    //
-    // auto end_precompute = std::chrono::high_resolution_clock::now();
-    // std::cout << "[SEQ] Precompute global keys wall time: "
-    //         << std::chrono::duration_cast<std::chrono::milliseconds>(end_precompute - start_precompute).count()
-    //         << " ms" << std::endl;
+    size_t partition_morsel_size = std::exp2(static_cast<size_t>(std::floor(std::log2(input.size() / 32))));
+    // std::cout << "Partition morsel size: " << partition_morsel_size << std::endl;
 
     // Stage 1: Pre-partition input and probe datasets
     auto part_start = std::chrono::high_resolution_clock::now();
     auto input_idx_partitions = PartitionUtils::partition_indices_parallel(
         input, input_schema, spec.partition_columns,
-        std::thread::hardware_concurrency(), 2048, 8
+        std::thread::hardware_concurrency(), partition_morsel_size, 8
     );
     auto probe_idx_partitions = PartitionUtils::partition_indices_parallel(
         probe, probe_schema, spec.partition_columns,
-        std::thread::hardware_concurrency(), 2048, 8
+        std::thread::hardware_concurrency(), partition_morsel_size, 8
     );
     auto part_end = std::chrono::high_resolution_clock::now();
     std::cout << "Partitioning wall time: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(part_end - part_start).count()
+            << std::chrono::duration_cast<std::chrono::microseconds>(part_end - part_start).count()
             << " ms" << std::endl;
 
 
@@ -371,17 +575,19 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     ThreadPool pool(pool_size);
 
     size_t batch_size = std::max<size_t>(1, pool_size / 2); // leave threads for morsels
-    const size_t morsel_size = 256; // tuneable
-    std::cout << "ThreadPool size: " << pool_size
-            << ", partition batch size: " << batch_size
-            << ", morsel_size: " << morsel_size << std::endl;
+    const size_t morsel_size = 2048; // tuneable
+    // std::cout << "ThreadPool size: " << pool_size
+    //         << ", partition batch size: " << batch_size
+    //         << ", morsel_size: " << morsel_size << std::endl;
 
     // Stage 3: Build the worklist => the partitions to process
     auto worklist = build_worklist(input_idx_partitions, probe_idx_partitions);
 
+    // std::cout << "build_worklist: " << std::endl;
+
     // Stage 4: Process the partitions in parallel using the thread pool
     if (worklist.size() == 1) {
-        cout << "Only one partition to process, processing inline." << endl;
+        // cout << "Only one partition to process, processing inline." << endl;
         auto [in_inds, pr_inds] = std::move(worklist[0]);
         process_partition(std::move(in_inds), std::move(pr_inds),
                           input, probe, input_schema, probe_schema,
@@ -395,12 +601,12 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
 
     auto join_end = std::chrono::high_resolution_clock::now();
     std::cout << "Join wall time: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(join_end - join_start).count()
+            << std::chrono::duration_cast<std::chrono::microseconds>(join_end - join_start).count()
             << " ms" << std::endl;
 
     auto total_end = std::chrono::high_resolution_clock::now();
     std::cout << "Total execute() wall time: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count()
+            << std::chrono::duration_cast<std::chrono::microseconds>(total_end - total_start).count()
             << " ms" << std::endl;
 
     // Stage 5: Append output column to probe schema
@@ -546,21 +752,21 @@ void BinaryWindowFunctionOperator::process_partition_sequential(
     JoinUtils local_join(spec.join_spec, spec.order_column);
     local_join.build_index_from_vectors_segtree(keys, values);
 
-    auto end_building_index = std::chrono::high_resolution_clock::now();
-    auto duration_building_index = std::chrono::duration_cast<std::chrono::milliseconds>(
-        end_building_index - start_building_index);
-    std::cout << "Time taken for BUILDING INDEX: " << duration_building_index.count() << " ms" << std::endl;
+    // auto end_building_index = std::chrono::high_resolution_clock::now();
+    // auto duration_building_index = std::chrono::duration_cast<std::chrono::milliseconds>(
+    //     end_building_index - start_building_index);
+    // std::cout << "Time taken for BUILDING INDEX: " << duration_building_index.count() << " ms" << std::endl;
 
     auto start_partition_process = std::chrono::high_resolution_clock::now();
     // Stage 4: Probe partition sequentially
     process_probe_partition_inline_sequential(pr_indices, probe, probe_schema,
-                                   keys, local_join, result,
-                                   *(new std::mutex())); // dummy mutex, never contended
+                                              keys, local_join, result,
+                                              *(new std::mutex())); // dummy mutex, never contended
 
-    auto end_partition_process = std::chrono::high_resolution_clock::now();
-    auto duration_partition_process = std::chrono::duration_cast<std::chrono::milliseconds>(
-        end_partition_process - start_partition_process);
-    std::cout << "Time taken for PARTITION PROCESSING: " << duration_partition_process.count() << " ms" << std::endl;
+    // auto end_partition_process = std::chrono::high_resolution_clock::now();
+    // auto duration_partition_process = std::chrono::duration_cast<std::chrono::milliseconds>(
+    //     end_partition_process - start_partition_process);
+    // std::cout << "Time taken for PARTITION PROCESSING: " << duration_partition_process.count() << " ms" << std::endl;
 }
 
 void BinaryWindowFunctionOperator::process_probe_partition_inline_sequential(
@@ -576,14 +782,14 @@ void BinaryWindowFunctionOperator::process_probe_partition_inline_sequential(
     result.reserve(old_size + pr_indices.size()); // ensure enough space
 
     size_t probe_begin_idx = probe_schema.index_of(spec.join_spec.begin_column);
-    size_t probe_end_idx   = probe_schema.index_of(spec.join_spec.end_column);
+    size_t probe_end_idx = probe_schema.index_of(spec.join_spec.end_column);
 
     for (size_t j = 0; j < pr_indices.size(); ++j) {
         size_t probe_idx = pr_indices[j];
         const DataRow &probe_row = probe[probe_idx];
 
         int32_t start = probe_row[probe_begin_idx];
-        int32_t end   = probe_row[probe_end_idx];
+        int32_t end = probe_row[probe_end_idx];
 
         auto lo_it = std::lower_bound(keys.begin(), keys.end(), start);
         auto hi_it = std::upper_bound(keys.begin(), keys.end(), end);

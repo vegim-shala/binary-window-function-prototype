@@ -7,8 +7,29 @@
 #include <vector>
 #include <string>
 #include <charconv>
+#include <cstdio>
+#include <string>
+#include <vector>
+#include <stdexcept>
+#include <utility>
+#include <cctype>
 
 namespace fs = std::filesystem;
+
+// ----------- FAST INTEGER PARSER (replaces std::from_chars) ----------
+inline int32_t fast_atoi(const char* start, const char* end) {
+    int32_t value = 0;
+    bool neg = false;
+    if (start < end && *start == '-') {
+        neg = true;
+        ++start;
+    }
+    while (start < end) {
+        value = value * 10 + (*start - '0');
+        ++start;
+    }
+    return neg ? -value : value;
+}
 
 // Helper function to get data directory path
 fs::path get_data_path() {
@@ -292,6 +313,73 @@ int32_t parse_value_optimized(const std::string& value) {
         return result;
     }
     return 0; // Fallback for parsing errors
+}
+
+// ----------- OPTIMIZED CSV READER ------------
+std::pair<Dataset, FileSchema> read_csv_fast(const std::string& filename) {
+    Dataset dataset;
+
+    FILE* f = fopen((get_data_path() / filename).c_str(), "rb");
+    if (!f) {
+        throw std::runtime_error("Cannot open CSV file: " + filename);
+    }
+
+    constexpr size_t BUFFER_SIZE = 8 * 1024 * 1024; // 8 MB buffer
+    std::vector<char> buffer(BUFFER_SIZE);
+
+    // Read header line (first line)
+    if (!fgets(buffer.data(), BUFFER_SIZE, f)) {
+        fclose(f);
+        throw std::runtime_error("CSV file is empty");
+    }
+
+    FileSchema schema = detect_schema(buffer.data());
+    schema.build_index();
+    size_t num_columns = schema.columns.size();
+
+    dataset.reserve(10'000'000);
+
+    std::vector<int32_t> row;
+    row.reserve(num_columns);
+
+    size_t line_count = 0;
+
+    // Process line by line
+    while (fgets(buffer.data(), BUFFER_SIZE, f)) {
+        char* p = buffer.data();
+        row.clear();
+
+        for (size_t col = 0; col < num_columns; col++) {
+            char* start = p;
+            while (*p != ',' && *p != '\n' && *p != '\r' && *p != '\0') {
+                ++p;
+            }
+
+            // Trim CR/LF before parsing
+            char* end = p;
+            while (end > start && (end[-1] == '\r' || end[-1] == '\n')) {
+                --end;
+            }
+
+            row.push_back(fast_atoi(start, end));
+
+            if (*p == ',') ++p; // skip comma
+        }
+
+        // Fill missing columns
+        while (row.size() < num_columns) {
+            row.push_back(0);
+        }
+
+        dataset.push_back(row);
+
+        if (++line_count % 100000 == 0) {
+            dataset.reserve(dataset.size() + 100000);
+        }
+    }
+
+    fclose(f);
+    return {dataset, schema};
 }
 
 std::pair<Dataset, FileSchema> read_csv_optimized(const std::string& filename) {

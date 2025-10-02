@@ -30,23 +30,80 @@ void JoinUtils::build_index_from_vectors_segtree(
     }
 }
 
-
-
-
-void JoinUtils::build_index_from_vectors_prefix_sums(const std::vector<uint32_t> &sorted_keys,
-                                                     const std::vector<uint32_t> &values) {
+void JoinUtils::build_index_from_vectors_prefix_sums(
+    const std::vector<uint32_t> &sorted_keys,
+    const std::vector<uint32_t> &values
+) {
     n = sorted_keys.size();
-    keys = sorted_keys; // copy
+    keys = sorted_keys;
 
-    prefix_sums.assign(n + 1, 0.0);
+    prefix.resize(n + 1);
+    prefix[0] = 0;
     for (size_t i = 0; i < n; ++i) {
-        prefix_sums[i + 1] = prefix_sums[i] + values[i];
+        prefix[i + 1] = prefix[i] + static_cast<uint64_t>(values[i]);
     }
 }
 
-double JoinUtils::prefix_sums_query(size_t l, size_t r) const {
-    // r is exclusive
-    return prefix_sums[r] - prefix_sums[l];
+
+void JoinUtils::build_eytzinger() {
+    size_t n = keys.size();
+    eyt.resize(n + 1);
+    pos_to_orig.resize(n + 1);
+
+    std::function<void(size_t, size_t, size_t)> build = [&](size_t l, size_t r, size_t k) {
+        if (l > r || k > n) return;
+        size_t m = (l + r) / 2;
+        eyt[k] = keys[m];
+        pos_to_orig[k] = m;
+        build(l, m - 1, 2 * k);
+        build(m + 1, r, 2 * k + 1);
+    };
+    build(0, n - 1, 1);
+}
+
+void JoinUtils::build_buckets() {
+    if (keys.empty()) return;
+
+    size_t nblocks = (keys.size() + bucket_size - 1) / bucket_size;
+    block_mins.resize(nblocks);
+
+    for (size_t b = 0; b < nblocks; ++b) {
+        block_mins[b] = keys[b * bucket_size];
+    }
+}
+
+void JoinUtils::build_index_from_vectors_sqrttree(
+    const std::vector<uint32_t> &sorted_keys,
+    const std::vector<uint32_t> &vals
+) {
+    keys = sorted_keys;
+    values.assign(vals.begin(), vals.end());
+    size_t n = values.size();
+
+    block_size = static_cast<size_t>(std::sqrt(n)) + 1;
+    num_blocks = (n + block_size - 1) / block_size;
+
+    block_sum.assign(num_blocks, 0);
+    sqrt_prefix.resize(n);
+    sqrt_suffix.resize(n);
+
+    for (size_t b = 0; b < num_blocks; ++b) {
+        size_t start = b * block_size;
+        size_t end = std::min(start + block_size, n);
+
+        uint64_t s = 0;
+        for (size_t i = start; i < end; i++) {
+            s += values[i];
+            sqrt_prefix[i] = s;
+        }
+        block_sum[b] = s;
+
+        uint64_t suf = 0;
+        for (size_t i = end; i-- > start;) {
+            suf += values[i];
+            sqrt_suffix[i] = suf;
+        }
+    }
 }
 
 void JoinUtils::build_index_from_vectors_sqrt_tree(const std::vector<uint32_t> &sorted_keys,
@@ -60,48 +117,9 @@ void JoinUtils::build_index_from_vectors_sqrt_tree(const std::vector<uint32_t> &
     block_size = static_cast<size_t>(std::ceil(std::sqrt(n)));
     size_t num_blocks = (n + block_size - 1) / block_size;
 
-    block_sums.assign(num_blocks, 0.0);
+    block_sum.assign(num_blocks, 0.0);
 
     for (size_t i = 0; i < n; i++) {
-        block_sums[i / block_size] += values[i];
+        block_sum[i / block_size] += values[i];
     }
 }
-
-double JoinUtils::sqrt_query(size_t l, size_t r) const {
-    if (l >= r || n == 0) return 0.0;
-
-    double res = 0.0;
-
-    size_t start_block = l / block_size;
-    size_t end_block = (r - 1) / block_size;
-
-    if (start_block == end_block) {
-        // all inside one block → sum directly
-        for (size_t i = l; i < r; i++) res += values[i];
-        return res;
-    }
-
-    // left partial block
-    size_t left_end = (start_block + 1) * block_size;
-    for (size_t i = l; i < left_end; i++) res += values[i];
-
-    // full blocks
-    for (size_t b = start_block + 1; b < end_block; b++) {
-        res += block_sums[b];
-    }
-
-    // right partial block
-    size_t right_start = end_block * block_size;
-    for (size_t i = right_start; i < r; i++) res += values[i];
-
-    return res;
-}
-
-
-void JoinUtils::build_index_from_vectors_two_pointer_sweep(const std::vector<uint32_t> &sorted_keys,
-                                                           const std::vector<uint32_t> &vals) {
-    n = sorted_keys.size();
-    keys = sorted_keys;
-    values = vals;
-}
-
