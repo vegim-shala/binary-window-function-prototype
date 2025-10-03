@@ -7,15 +7,17 @@
 #include <thread>
 #include <unordered_set>
 
+#include "thread_pool.h"
+
 namespace PartitionUtils {
     using PartitionKey = std::string;
 
     // Custom hash for vector<int64_t>
     struct VecHash {
-        size_t operator()(const std::vector<int32_t>& v) const noexcept {
+        size_t operator()(const std::vector<int32_t> &v) const noexcept {
             // 64-bit FNV-1a-ish multiplicative mix
             uint64_t h = 1469598103934665603ull;
-            for (int32_t x : v) {
+            for (int32_t x: v) {
                 uint64_t u = static_cast<uint64_t>(static_cast<uint32_t>(x));
                 h ^= u;
                 h *= 1099511628211ull;
@@ -105,6 +107,7 @@ namespace PartitionUtils {
         const Dataset &dataset,
         const FileSchema &schema,
         const std::vector<std::string> &partition_columns,
+        ThreadPool &pool,
         size_t num_threads = std::thread::hardware_concurrency(),
         size_t morsel_size = 2048
     );
@@ -198,8 +201,10 @@ namespace PartitionUtils {
         const FileSchema &schema,
         const std::vector<std::string> &partition_columns,
         size_t num_threads,
+        ThreadPool &pool,
         size_t radix_bits = 8, // 256 buckets
         size_t morsel_size = 2048 // 4KB morsels
+
     );
 
     RadixPartitionResult partition_dataset_radix_sequential(
@@ -240,7 +245,8 @@ namespace PartitionUtils {
         const Dataset &dataset,
         size_t col_idx,
         RadixPartitionResult &buckets,
-        size_t num_threads
+        size_t num_threads,
+        ThreadPool &pool
     );
 
     // --- Unified dispatchers (what you’ll call from the algorithm) ---
@@ -256,6 +262,7 @@ namespace PartitionUtils {
         const Dataset &dataset,
         const FileSchema &schema,
         const std::vector<std::string> &partition_columns,
+        ThreadPool &pool,
         size_t num_threads = std::thread::hardware_concurrency(),
         size_t morsel_size = 2048,
         size_t radix_bits = 8 // used only for 1-col
@@ -263,9 +270,12 @@ namespace PartitionUtils {
 
     // Optional simple 64-bit mixer (cheap, adequate)
     static inline uint64_t mix64(uint64_t x) {
-        x ^= x >> 33; x *= 0xff51afd7ed558ccdULL;
-        x ^= x >> 33; x *= 0xc4ceb9fe1a85ec53ULL;
-        x ^= x >> 33; return x;
+        x ^= x >> 33;
+        x *= 0xff51afd7ed558ccdULL;
+        x ^= x >> 33;
+        x *= 0xc4ceb9fe1a85ec53ULL;
+        x ^= x >> 33;
+        return x;
     }
 
     PartitionIndexResult

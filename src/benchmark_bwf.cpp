@@ -36,10 +36,11 @@ public:
         // test_huge_single_partition(algo_ind); // E1
         // test_one_partition_scaling(algo_ind); // Z1
         // test_one_partition_one_range(algo_ind); // Z2
-        // test_many_partitions_scaling(algo_ind); // Z3
+        test_many_partitions_scaling(algo_ind); // Z3
         // test_one_partition_scaling_one_probe_row(algo_ind); // Z1.1
         // test_probing_scaling(algo_ind); // Z4
-        test_one_partition_scaling_seq(algo_ind); // Z1 seq
+        // test_one_partition_scaling_seq(algo_ind); // Z1 seq
+        // test_many_partitions_scaling_seq(algo_ind); // Z3 seq
 
         std::cout << "\n=== Benchmark Complete ===\n";
     }
@@ -541,7 +542,7 @@ private:
             auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
             auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
-            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n\n";
 
             if (algo_ind == 1) {
                 BinaryWindowFunctionModel model = create_test_model(1);
@@ -700,6 +701,50 @@ private:
             }
 
             // std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void test_many_partitions_scaling_seq(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z3. Scenario: Testing for arbitrary ranges, many partitions of different number of values)\n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            {"Z3/input1.csv", "Z3/probe1.csv"},
+            {"Z3/input2.csv", "Z3/probe2.csv"},
+            {"Z3/input3.csv", "Z3/probe3.csv"},
+            {"Z3/input4.csv", "Z3/probe4.csv"},
+            {"Z3/input5.csv", "Z3/probe5.csv"},
+            {"Z3/input6.csv", "Z3/probe6.csv"},
+            {"Z3/input7.csv", "Z3/probe7.csv"},
+            {"Z3/input8.csv", "Z3/probe8.csv"},
+            {"Z3/input11.csv", "Z3/probe11.csv"},
+            {"Z3/input9.csv", "Z3/probe9.csv"},
+            {"Z3/input12.csv", "Z3/probe12.csv"},
+            {"Z3/input10.csv", "Z3/probe10.csv"},
+            {"Z3/input13.csv", "Z3/probe13.csv"},
+            {"Z3/input14.csv", "Z3/probe14.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+        for (int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
+
+                auto [result, new_schema] = op.execute_sequential(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(1);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }

@@ -638,6 +638,11 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
 
     auto total_start = std::chrono::high_resolution_clock::now();
 
+    // Stage 0: Setup thread pool
+    size_t pool_size = std::thread::hardware_concurrency();
+    if (pool_size == 0) pool_size = 2;
+    ThreadPool pool(pool_size);
+
     //TODO: Evaluate and tune partition morsel size
     size_t partition_morsel_size = std::exp2(static_cast<size_t>(std::floor(std::log2(input.size() / 32))));
     // std::cout << "Partition morsel size: " << partition_morsel_size << std::endl;
@@ -645,12 +650,10 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     // Stage 1: Pre-partition input and probe datasets
     auto part_start = std::chrono::high_resolution_clock::now();
     auto input_idx_partitions = PartitionUtils::partition_indices_parallel(
-        input, input_schema, spec.partition_columns,
-        std::thread::hardware_concurrency(), partition_morsel_size, 8
+        input, input_schema, spec.partition_columns, pool, pool_size, partition_morsel_size, 8
     );
     auto probe_idx_partitions = PartitionUtils::partition_indices_parallel(
-        probe, probe_schema, spec.partition_columns,
-        std::thread::hardware_concurrency(), partition_morsel_size, 8
+        probe, probe_schema, spec.partition_columns, pool, pool_size, partition_morsel_size, 8
     );
     auto part_end = std::chrono::high_resolution_clock::now();
     std::cout << "Partitioning wall time: "
@@ -660,9 +663,6 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
 
     // Stage 2: Setup thread pool that we'll use to process partitions in batches, and morsels within partitions
     auto join_start = std::chrono::high_resolution_clock::now();
-    size_t pool_size = std::thread::hardware_concurrency();
-    if (pool_size == 0) pool_size = 2;
-    ThreadPool pool(pool_size);
 
     size_t batch_size = std::max<size_t>(1, pool_size / 2); // leave threads for morsels
     const size_t morsel_size = 2048; // tuneable
@@ -673,12 +673,16 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     // Stage 3: Build the worklist => the partitions to process
     auto worklist = build_worklist(input_idx_partitions, probe_idx_partitions);
 
+    // std::cout << "build_worklist: " << std::endl;
+
     // Stage 4: Process the partitions in parallel using the thread pool
     if (worklist.size() == 1) {
+        // cout << "Only one partition to process, processing inline." << endl;
         auto [in_inds, pr_inds] = std::move(worklist[0]);
         process_partition(std::move(in_inds), std::move(pr_inds),
                           input, probe, input_schema, probe_schema,
                           result, result_mtx, pool, morsel_size);
+        // return
     } else {
         process_worklist(worklist, input, probe, input_schema, probe_schema,
                          result, result_mtx, pool, batch_size, partition_morsel_size); // current path

@@ -231,12 +231,6 @@ namespace fs = std::filesystem;
 using namespace std;
 
 #include <algorithm>
-#include <execution>
-#include <random>
-#include <vector>
-#include <chrono>
-#include <iostream>
-#include <algorithm>
 #include <random>
 #include <vector>
 #include <iostream>
@@ -302,7 +296,9 @@ void parallel_sort(std::vector<T> &data, ThreadPool &pool) {
 
 int main() {
     ThreadPool pool(std::thread::hardware_concurrency());
-    for (size_t N : {100'000, 200000, 500000, 1000000, 2000000, 4000000,5000000,6000000,7000000,7500000,8000000,9000000,10000000,20000000,30000000,40000000,50000000,60000000,80000000,100000000}) {
+
+    for (size_t N : {100'000, 200000, 500000, 1000000, 2000000, 4000000,5000000,6000000,7000000,7500000,8000000,9000000,
+         10000000,20000000,30000000,40000000,50000000,60000000,80000000,100000000, 200000000, 300000000, 400000000, 500000000, 1000000000}) {
         std::vector<int> data(N);
         std::mt19937 rng(42);
         std::uniform_int_distribution<int> dist(0, 1000000);
@@ -312,10 +308,27 @@ int main() {
         parallel_sort(data, pool);
         auto end = std::chrono::high_resolution_clock::now();
 
-        auto ms = chrono::duration_cast<chrono::microseconds>(end - start).count();
-        cout << "N=" << N << " time=" << ms << " T/N=" << double(ms)/N << "\n";
+        double ms = std::chrono::duration<double, std::milli>(end - start).count();
+        std::cout << "N=" << N << " time=" << ms << " ms\n";
     }
 }
+
+// int main() {
+//     std::mt19937 rng(123);
+//     for (size_t N : {100'000, 200000, 500000, 1000000, 2000000, 4000000,5000000,6000000,7000000,7500000,8000000,9000000,
+//         10000000,20000000,30000000,40000000,50000000,60000000,80000000,100000000, 200000000, 300000000, 400000000, 500000000, 1000000000}) {
+//         vector<int> data(N);
+//         iota(data.begin(), data.end(), 0);
+//         shuffle(data.begin(), data.end(), mt19937{123});
+//
+//         auto start = chrono::high_resolution_clock::now();
+//         sort(data.begin(), data.end());  // O(N log N)
+//         auto end = chrono::high_resolution_clock::now();
+//
+//         auto ms = chrono::duration_cast<chrono::microseconds>(end - start).count();
+//         cout << "N=" << N << " time=" << ms << " T/N=" << double(ms)/N << "\n";
+//     }
+// }
 
 // int main() {
 //     std::string folder_name = "Z1";

@@ -8,9 +8,11 @@
 #include <unordered_map>
 #include <string>
 #include <atomic>
+#include <future>
 #include <iostream>
 #include <numeric>
 #include <ips2ra/ips2ra.hpp>
+#include <operators/utils/thread_pool.h>
 
 using namespace PartitionUtils;
 
@@ -38,6 +40,7 @@ PartitionIndexResult PartitionUtils::partition_dataset_index_morsel(
     const Dataset &dataset,
     const FileSchema &schema,
     const std::vector<std::string> &partition_columns,
+    ThreadPool &pool,
     size_t num_threads,
     size_t morsel_size
 ) {
@@ -45,27 +48,26 @@ PartitionIndexResult PartitionUtils::partition_dataset_index_morsel(
     size_t n = dataset.size();
     std::atomic<size_t> next_morsel(0);
 
-    std::vector<std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq> > thread_parts(num_threads);
+    std::vector<std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq>> thread_parts(num_threads);
 
-    auto worker = [&](size_t tid) {
-        auto &local = thread_parts[tid];
-        while (true) {
-            size_t start = next_morsel.fetch_add(morsel_size);
-            if (start >= n) break;
-            size_t end = std::min(start + morsel_size, n);
-            for (size_t i = start; i < end; ++i) {
-                process_row(dataset, i, col_indices, local);
-            }
+    {
+        std::vector<std::future<void>> futs;
+        futs.reserve(num_threads);
+
+        for (size_t tid = 0; tid < num_threads; ++tid) {
+            futs.push_back(pool.submit([&, tid] {
+                auto &local = thread_parts[tid];
+                while (true) {
+                    size_t start = next_morsel.fetch_add(morsel_size);
+                    if (start >= n) break;
+                    size_t end = std::min(start + morsel_size, n);
+                    for (size_t i = start; i < end; ++i) {
+                        process_row(dataset, i, col_indices, local);
+                    }
+                }
+            }));
         }
-    };
-
-    std::vector<std::thread> threads;
-    threads.reserve(num_threads);
-    for (size_t t = 0; t < num_threads; ++t) {
-        threads.emplace_back(worker, t);
-    }
-    for (auto &th: threads) {
-        th.join();
+        for (auto &f : futs) f.get();
     }
 
     std::unordered_map<std::vector<int32_t>, IndexDataset, VecHash, VecEq> global;
@@ -81,6 +83,7 @@ RadixPartitionResult PartitionUtils::partition_dataset_radix_morsel(
     const FileSchema &schema,
     const std::vector<std::string> &partition_columns,
     size_t num_threads,
+    ThreadPool &pool,
     size_t radix_bits,
     size_t morsel_size
 ) {
@@ -88,62 +91,53 @@ RadixPartitionResult PartitionUtils::partition_dataset_radix_morsel(
     const size_t num_morsels = (s.n + morsel_size - 1) / morsel_size;
 
     // Pass 1: count per morsel
-    std::vector<std::vector<size_t> > morsel_bucket_counts(
+    std::vector<std::vector<size_t>> morsel_bucket_counts(
         num_morsels, std::vector<size_t>(s.num_buckets, 0));
+
     {
-        std::vector<std::thread> threads;
-        threads.reserve(num_threads);
+        std::vector<std::future<void>> futs;
+        futs.reserve(num_threads);
 
-        auto worker = [&](size_t tid) {
-            // static chunk assignment: contiguous morsels per thread
-            const size_t m_start = (num_morsels * tid) / num_threads;
-            const size_t m_end   = (num_morsels * (tid + 1)) / num_threads;
-
-            for (size_t m = m_start; m < m_end; ++m) {
-                const size_t start = m * morsel_size;
-                const size_t end   = std::min(start + morsel_size, s.n);
-                radix_count_range(dataset, start, end,
-                                  s.col_idx, s.mask, morsel_bucket_counts[m]);
-            }
-        };
-
-        for (size_t t = 0; t < num_threads; ++t) {
-            threads.emplace_back(worker, t);
+        for (size_t tid = 0; tid < num_threads; ++tid) {
+            futs.push_back(pool.submit([&, tid] {
+                const size_t m_start = (num_morsels * tid) / num_threads;
+                const size_t m_end   = (num_morsels * (tid + 1)) / num_threads;
+                for (size_t m = m_start; m < m_end; ++m) {
+                    const size_t start = m * morsel_size;
+                    const size_t end   = std::min(start + morsel_size, s.n);
+                    radix_count_range(dataset, start, end,
+                                      s.col_idx, s.mask, morsel_bucket_counts[m]);
+                }
+            }));
         }
-        for (auto &th : threads) th.join();
+        for (auto &f : futs) f.get();
     }
 
     // Prepare buckets + offsets
     RadixPartitionResult buckets;
-    std::vector<std::vector<size_t> > morsel_bucket_offsets;
+    std::vector<std::vector<size_t>> morsel_bucket_offsets;
     radix_prepare_buckets(morsel_bucket_counts, s.num_buckets, buckets, morsel_bucket_offsets);
 
     // Pass 2: scatter
     {
-        std::vector<std::thread> threads;
-        threads.reserve(num_threads);
+        std::vector<std::future<void>> futs;
+        futs.reserve(num_threads);
 
-        auto worker = [&](size_t tid) {
-            const size_t m_start = (num_morsels * tid) / num_threads;
-            const size_t m_end   = (num_morsels * (tid + 1)) / num_threads;
-
-            for (size_t m = m_start; m < m_end; ++m) {
-                const size_t start = m * morsel_size;
-                const size_t end   = std::min(start + morsel_size, s.n);
-
-                // IMPORTANT: use a reference, not a copy
-                auto &local_offsets = morsel_bucket_offsets[m];
-
-                radix_scatter_range(dataset, start, end,
-                                    s.col_idx, s.mask,
-                                    local_offsets, buckets);
-            }
-        };
-
-        for (size_t t = 0; t < num_threads; ++t) {
-            threads.emplace_back(worker, t);
+        for (size_t tid = 0; tid < num_threads; ++tid) {
+            futs.push_back(pool.submit([&, tid] {
+                const size_t m_start = (num_morsels * tid) / num_threads;
+                const size_t m_end   = (num_morsels * (tid + 1)) / num_threads;
+                for (size_t m = m_start; m < m_end; ++m) {
+                    const size_t start = m * morsel_size;
+                    const size_t end   = std::min(start + morsel_size, s.n);
+                    auto &local_offsets = morsel_bucket_offsets[m];
+                    radix_scatter_range(dataset, start, end,
+                                        s.col_idx, s.mask,
+                                        local_offsets, buckets);
+                }
+            }));
         }
-        for (auto &th : threads) th.join();
+        for (auto &f : futs) f.get();
     }
 
     return buckets;
@@ -200,7 +194,7 @@ SingleKeyIndexMap PartitionUtils::radix_buckets_to_partitions_sequential(
     for (auto &bucket: buckets) { // for every bucket
         for (size_t row_idx: bucket) { // for every row in the bucket
             int32_t key = dataset[row_idx][col_idx]; // extract the key
-            auto &vec = out[key];
+            auto &vec = out[key]; // on the first iteration out is empty, so this creates a new vector for the key and then
             if (vec.empty()) vec.reserve(64);
             vec.push_back(row_idx);
         }
@@ -213,36 +207,37 @@ SingleKeyIndexMap PartitionUtils::radix_buckets_to_partitions_morsel(
     const Dataset &dataset,
     size_t col_idx,
     RadixPartitionResult &buckets,
-    size_t num_threads
+    size_t num_threads,
+    ThreadPool &pool
 ) {
     const size_t B = buckets.size();
     std::atomic<size_t> next_bucket{0};
-
-    // Thread-local maps -> merge
     std::vector<SingleKeyIndexMap> thread_parts(num_threads);
 
-    auto worker = [&](size_t tid) {
-        auto &local = thread_parts[tid];
-        // modest reserve to reduce early rehash
-        local.reserve(64);
+    {
+        std::vector<std::future<void>> futs;
+        futs.reserve(num_threads);
 
-        while (true) {
-            size_t b = next_bucket.fetch_add(1);
-            if (b >= B) break;
-            auto &bucket = buckets[b];
-            for (size_t row_idx: bucket) {
-                int32_t key = dataset[row_idx][col_idx];
-                auto &vec = local[key];
-                if (vec.empty()) vec.reserve(64);
-                vec.push_back(row_idx);
-            }
+        for (size_t tid = 0; tid < num_threads; ++tid) {
+            futs.push_back(pool.submit([&, tid] {
+                auto &local = thread_parts[tid];
+                local.reserve(64);
+
+                while (true) {
+                    size_t b = next_bucket.fetch_add(1);
+                    if (b >= B) break;
+                    auto &bucket = buckets[b];
+                    for (size_t row_idx : bucket) {
+                        int32_t key = dataset[row_idx][col_idx];
+                        auto &vec = local[key];
+                        if (vec.empty()) vec.reserve(64);
+                        vec.push_back(row_idx);
+                    }
+                }
+            }));
         }
-    };
-
-    std::vector<std::thread> threads;
-    threads.reserve(num_threads);
-    for (size_t t = 0; t < num_threads; ++t) threads.emplace_back(worker, t);
-    for (auto &th: threads) th.join();
+        for (auto &f : futs) f.get();
+    }
 
     SingleKeyIndexMap global;
     global.reserve(num_threads * 64);
@@ -292,6 +287,7 @@ PartitionUtils::PartitionIndexResult PartitionUtils::partition_indices_parallel(
     const Dataset &dataset,
     const FileSchema &schema,
     const std::vector<std::string> &partition_columns,
+    ThreadPool &pool,
     size_t num_threads,
     size_t morsel_size,
     size_t radix_bits
@@ -309,7 +305,7 @@ PartitionUtils::PartitionIndexResult PartitionUtils::partition_indices_parallel(
         auto start_bucketing = std::chrono::high_resolution_clock::now();
         auto buckets = partition_dataset_radix_morsel(
             dataset, schema, partition_columns,
-            num_threads, radix_bits, morsel_size
+            num_threads, pool, radix_bits, morsel_size
         );
         auto end_bucketing = std::chrono::high_resolution_clock::now();
         std::cout << "Radix bucketing wall time: "
@@ -317,14 +313,14 @@ PartitionUtils::PartitionIndexResult PartitionUtils::partition_indices_parallel(
                   << " ms" << std::endl;
 
         auto start_grouping = std::chrono::high_resolution_clock::now();
-        auto by_key = radix_buckets_to_partitions_morsel(dataset, s.col_idx, buckets, num_threads);
+        auto by_key = radix_buckets_to_partitions_morsel(dataset, s.col_idx, buckets, 8, pool);
         auto end_grouping = std::chrono::high_resolution_clock::now();
         std::cout << "Radix grouping wall time: "
                   << std::chrono::duration_cast<std::chrono::microseconds>(end_grouping - start_grouping).count()
                   << " ms" << std::endl;
         return by_key;
     } else {
-        return partition_dataset_index_morsel(dataset, schema, partition_columns, num_threads, morsel_size);
+        return partition_dataset_index_morsel(dataset, schema, partition_columns, pool, num_threads, morsel_size);
     }
 }
 
