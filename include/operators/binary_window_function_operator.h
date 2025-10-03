@@ -129,6 +129,16 @@ private:
         JoinUtils &local_join
     ) const;
 
+    std::vector<DataRow> process_probe_morsel_sort_probe_interleaving(
+        size_t mstart,
+        size_t mend,
+        const PartitionUtils::IndexDataset &pr_indices,
+        const Dataset &probe,
+        const FileSchema &probe_schema,
+        const std::vector<uint32_t> &keys,
+        JoinUtils &local_join
+    ) const;
+
     // ------------------------ These functions are for sequential execution only ------------------------
     void process_worklist_sequential(
         std::vector<std::pair<PartitionUtils::IndexDataset, PartitionUtils::IndexDataset> > &worklist,

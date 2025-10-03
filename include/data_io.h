@@ -60,5 +60,6 @@ std::pair<Dataset, FileSchema> read_binary(const std::string& filename);
 std::pair<Dataset, FileSchema>  read_csv(const std::string& filename);
 std::pair<Dataset, FileSchema> read_csv_optimized(const std::string& filename);
 std::pair<Dataset, FileSchema> read_csv_fast(const std::string& filename);
+std::pair<Dataset, FileSchema> read_csv_fast_parallel(const std::string& filename, int num_threads);
 void write_csv(const std::string& filename, const Dataset& dataset, const FileSchema& schema);
 

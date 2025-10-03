@@ -151,40 +151,50 @@ public:
 
     inline size_t eyt_lower(uint32_t x) const {
         size_t n = keys.size();
-        size_t k = 1;
+        size_t k = 1; // root
+        size_t res = n; // default = not found
+
         while (k <= n) {
             PREFETCH(&eyt[2 * k]);
-            k = 2 * k + (eyt[k] < x);
+            if (x <= eyt[k]) {
+                res = pos_to_orig[k]; // candidate
+                k = 2 * k; // go left
+            } else {
+                k = 2 * k + 1; // go right
+            }
         }
-        int shift = __builtin_ffs(~k);
-        k >>= shift;
-        return (k == 0 ? n : pos_to_orig[k]);
+        return res;
     }
 
     inline size_t eyt_upper(uint32_t x) const {
         size_t n = keys.size();
-        size_t k = 1;
+        size_t k = 1; // root
+        size_t res = n; // default = not found
+
         while (k <= n) {
             PREFETCH(&eyt[2 * k]);
-            k = 2 * k + (eyt[k] <= x);
+            if (x < eyt[k]) {
+                res = pos_to_orig[k]; // candidate
+                k = 2 * k; // go left
+            } else {
+                k = 2 * k + 1; // go right
+            }
         }
-        int shift = __builtin_ffs(~k);
-        k >>= shift;
-        return (k == 0 ? n : pos_to_orig[k]);
+        return res;
     }
 
     // Returns first index i in [L, R) with a[i] >= x
-    inline size_t bounded_lower_bound(size_t L, size_t R, uint32_t x) {
+    inline size_t bounded_lower_bound(size_t L, size_t R, uint32_t x) const {
         if (L >= R) return L;
         size_t n = R - L;
         size_t pos = 0;
         // largest power of two <= n
-        #if defined(__GNUC__) || defined(__clang__)
-                size_t step = 1ull << (63 - __builtin_clzll(n));
-        #else
+#if defined(__GNUC__) || defined(__clang__)
+        size_t step = 1ull << (63 - __builtin_clzll(n));
+#else
                 size_t step = 1;
                 while ((step << 1) <= n) step <<= 1;
-        #endif
+#endif
         while (step) {
             size_t nxt = pos + step;
             if (nxt <= n && keys[L + nxt - 1] < x) pos = nxt;
@@ -194,16 +204,16 @@ public:
     }
 
     // Returns first index i in [L, R) with a[i] > x
-    inline size_t bounded_upper_bound(size_t L, size_t R, uint32_t x) {
+    inline size_t bounded_upper_bound(size_t L, size_t R, uint32_t x) const {
         if (L >= R) return L;
         size_t n = R - L;
         size_t pos = 0;
-        #if defined(__GNUC__) || defined(__clang__)
-                size_t step = 1ull << (63 - __builtin_clzll(n));
-        #else
+#if defined(__GNUC__) || defined(__clang__)
+        size_t step = 1ull << (63 - __builtin_clzll(n));
+#else
                 size_t step = 1;
                 while ((step << 1) <= n) step <<= 1;
-        #endif
+#endif
         while (step) {
             size_t nxt = pos + step;
             if (nxt <= n && keys[L + nxt - 1] <= x) pos = nxt;
@@ -213,11 +223,11 @@ public:
     }
 
     // Forward gallop to lower_bound starting from `pos`, then bounded refine.
-    inline size_t eyt_gallop_lower(size_t pos, uint32_t x) {
-        const size_t n = keys.size();
-        if (pos >= n || keys[pos] >= x) return pos; // already at/after target
+    inline size_t eyt_gallop_lower(size_t start, uint32_t x) const {
+        size_t n = keys.size();
+        if (start >= n || keys[start] >= x) return start;
 
-        size_t cur = pos, step = 1;
+        size_t cur = start, step = 1;
         while (cur + step < n && keys[cur + step] < x) {
             PREFETCH(&keys[cur + step + step]);
             cur += step;
@@ -229,11 +239,11 @@ public:
     }
 
     // Forward gallop to upper_bound starting from `pos`, then bounded refine.
-    inline size_t eyt_gallop_upper(size_t pos, uint32_t x) {
-        const size_t n = keys.size();
-        if (pos >= n || keys[pos] > x) return pos;  // already past target
+    inline size_t eyt_gallop_upper(size_t start, uint32_t x) const {
+        size_t n = keys.size();
+        if (start >= n || keys[start] > x) return start;
 
-        size_t cur = pos, step = 1;
+        size_t cur = start, step = 1;
         while (cur + step < n && keys[cur + step] <= x) {
             PREFETCH(&keys[cur + step + step]);
             cur += step;
@@ -244,6 +254,138 @@ public:
         return bounded_upper_bound(L, R, x);
     }
 
+    inline std::pair<size_t, size_t>
+    safe_bounds(size_t start, size_t end) {
+        auto lo_it = std::lower_bound(keys.begin(), keys.end(), start);
+        auto hi_it = std::upper_bound(keys.begin(), keys.end(), end);
+
+        size_t lo = static_cast<size_t>(lo_it - keys.begin());
+        size_t hi = static_cast<size_t>(hi_it - keys.begin());
+
+        if (hi > keys.size()) {
+            throw std::runtime_error("safe_bounds: hi out of range ("
+                                     + std::to_string(hi) + "/" + std::to_string(keys.size()) + ")");
+        }
+        return {lo, hi};
+    }
+
+    // Minimal batched lower_bound
+    inline std::vector<size_t> batched_lower_bound(
+        const std::vector<uint32_t> &queries
+    ) {
+        size_t n = keys.size();
+        size_t q = queries.size();
+
+        std::vector<size_t> lows(q, 0);
+        std::vector<size_t> highs(q, n);
+
+        while (true) {
+            bool updated = false;
+            for (size_t i = 0; i < q; i++) {
+                if (lows[i] < highs[i]) {
+                    size_t mid = (lows[i] + highs[i]) >> 1;
+                    if (keys[mid] < queries[i]) {
+                        lows[i] = mid + 1;
+                    } else {
+                        highs[i] = mid;
+                    }
+                    updated = true;
+                }
+            }
+            if (!updated) break;
+        }
+        return lows; // lows[i] == first index >= queries[i]
+    }
+
+    // Minimal batched upper_bound
+    inline std::vector<size_t> batched_upper_bound(
+        const std::vector<uint32_t> &queries
+    ) {
+        size_t n = keys.size();
+        size_t q = queries.size();
+
+        std::vector<size_t> lows(q, 0);
+        std::vector<size_t> highs(q, n);
+
+        while (true) {
+            bool updated = false;
+            for (size_t i = 0; i < q; i++) {
+                if (lows[i] < highs[i]) {
+                    size_t mid = (lows[i] + highs[i]) >> 1;
+                    if (keys[mid] <= queries[i]) {
+                        lows[i] = mid + 1;
+                    } else {
+                        highs[i] = mid;
+                    }
+                    updated = true;
+                }
+            }
+            if (!updated) break;
+        }
+        return lows; // lows[i] == first index > queries[i]
+    }
+
+    inline std::vector<size_t> batched_lower_bound_bitwise(
+        const std::vector<uint32_t> &queries
+    ) {
+        size_t n = keys.size();
+        size_t q = queries.size();
+
+        std::vector<size_t> pos(q, 0);
+
+        // Largest power of two ≤ n
+        size_t step = 1ULL << (63 - __builtin_clzll(n));
+
+        while (step > 0) {
+            for (size_t i = 0; i < q; i++) {
+                size_t next = pos[i] + step;
+                if (next < n && keys[next] < queries[i]) {
+                    pos[i] = next;
+                }
+            }
+            step >>= 1;
+        }
+
+        // After loop, pos[i] points to the greatest index where arr[pos[i]] < query
+        // So the true lower_bound is pos[i] + 1
+        for (size_t i = 0; i < q; i++) {
+            if (pos[i] < n && keys[pos[i]] < queries[i]) {
+                pos[i]++;
+            }
+        }
+
+        return pos;
+    }
+
+    inline std::vector<size_t> batched_upper_bound_bitwise(
+        const std::vector<uint32_t> &queries
+    ) {
+        size_t n = keys.size();
+        size_t q = queries.size();
+
+        std::vector<size_t> pos(q, 0);
+
+        size_t step = 1ULL << (63 - __builtin_clzll(n));
+
+        while (step > 0) {
+            for (size_t i = 0; i < q; i++) {
+                size_t next = pos[i] + step;
+                if (next < n && keys[next] <= queries[i]) {
+                    pos[i] = next;
+                }
+            }
+            step >>= 1;
+        }
+
+        // For upper_bound, true position is pos[i] + 1
+        for (size_t i = 0; i < q; i++) {
+            if (pos[i] < n && keys[pos[i]] <= queries[i]) {
+                pos[i]++;
+            }
+        }
+
+        return pos;
+    }
 
     // --- For bucketed search ---
     size_t bucket_size = 1024; // tuneable

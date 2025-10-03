@@ -13,6 +13,15 @@
 #include <stdexcept>
 #include <utility>
 #include <cctype>
+#include <iostream>
+#include <fstream>
+#include <thread>
+#include <future>
+#include <vector>
+#include <cstring>
+#include <stdexcept>
+#include <filesystem>
+#include <mutex>
 
 namespace fs = std::filesystem;
 
@@ -48,181 +57,6 @@ fs::path get_data_path() {
 
     return data_path;
 }
-
-// double extract_numeric(const ColumnValue& value) {
-//     if (holds_alternative<int>(value)) {
-//         return static_cast<double>(get<int>(value));
-//     } else if (holds_alternative<double>(value)) {
-//         return get<double>(value);
-//     } else {
-//         throw std::runtime_error("Expected numeric column, found string.");
-//     }
-// }
-
-// ------------------------------ BINARY IMPLEMENTATION ------------------------------ //
-
-// Binary write implementation
-// void write_binary(const std::string& filename, const Dataset& dataset, const FileSchema& schema) {
-//     fs::path filepath = get_data_path() / filename;
-//     std::ofstream file(filepath, std::ios::binary);
-//
-//     // Write HEADER
-//     int32_t col_count = schema.columns.size(); // first the column count
-//     file.write(reinterpret_cast<const char*>(&col_count), sizeof(col_count));
-//
-//     for (const auto& col : schema.columns) { //then we write the schema one by one to conclude the header
-//         // Write column name
-//         int32_t name_len = col.size();
-//         file.write(reinterpret_cast<const char*>(&name_len), sizeof(name_len));
-//         file.write(col.data(), name_len);
-//
-//         // Write column type
-//         std::string type_str = schema.column_types.at(col);
-//         int32_t type_len = type_str.size();
-//         file.write(reinterpret_cast<const char*>(&type_len), sizeof(type_len));
-//         file.write(type_str.data(), type_len);
-//     }
-//
-//     // Write data
-//     for (const auto& row : dataset) {
-//         for (size_t i = 0; i < row.size(); ++i) {
-//             const auto& value = row[i];
-//             std::visit([&file](auto&& arg) {
-//                 using T = std::decay_t<decltype(arg)>;
-//                 if constexpr (std::is_same_v<T, int>) {
-//                     file.write(reinterpret_cast<const char*>(&arg), sizeof(arg));
-//                 } else if constexpr (std::is_same_v<T, double>) {
-//                     file.write(reinterpret_cast<const char*>(&arg), sizeof(arg));
-//                 } else if constexpr (std::is_same_v<T, std::string>) {
-//                     int32_t len = arg.size();
-//                     file.write(reinterpret_cast<const char*>(&len), sizeof(len));
-//                     file.write(arg.data(), len);
-//                 }
-//             }, value);
-//         }
-//     }
-// }
-//
-// void verify_binary_file(const std::string& filename) {
-//     fs::path filepath = get_data_path() / filename;
-//     std::ifstream file(filepath, std::ios::binary | std::ios::ate);
-//     if (!file) {
-//         std::cerr << "Cannot open file: " << filepath << "\n";
-//         return;
-//     }
-//
-//     size_t file_size = file.tellg();
-//     file.seekg(0);
-//
-//     std::cout << "Binary File Verification (" << filename << ")\n";
-//     std::cout << "File size: " << file_size << " bytes\n\n";
-//
-//     try {
-//         // Read column count
-//         int32_t column_count;
-//         file.read(reinterpret_cast<char*>(&column_count), sizeof(column_count));
-//         std::cout << "Column count: " << column_count << "\n";
-//
-//         // Read schema
-//         for (int i = 0; i < column_count; ++i) {
-//             int32_t name_len, type_len;
-//             file.read(reinterpret_cast<char*>(&name_len), sizeof(name_len));
-//             std::vector<char> name_buf(name_len);
-//             file.read(name_buf.data(), name_len);
-//
-//             file.read(reinterpret_cast<char*>(&type_len), sizeof(type_len));
-//             std::vector<char> type_buf(type_len);
-//             file.read(type_buf.data(), type_len);
-//
-//             std::cout << "Column " << i+1 << ": "
-//                       << std::string(name_buf.begin(), name_buf.end())
-//                       << " (" << std::string(type_buf.begin(), type_buf.end()) << ")\n";
-//         }
-//
-//         // Estimate row count
-//         size_t header_size = file.tellg();
-//         if (header_size < file_size) {
-//             size_t remaining = file_size - header_size;
-//             size_t row_size = column_count * sizeof(int32_t); // Adjust if you have other types
-//             if (row_size > 0) {
-//                 size_t estimated_rows = remaining / row_size;
-//                 std::cout << "\nEstimated row count: " << estimated_rows << "\n";
-//             }
-//         }
-//     } catch (const std::exception& e) {
-//         std::cerr << "Verification error: " << e.what() << "\n";
-//     }
-// }
-
-// std::pair<Dataset, FileSchema> read_binary(const std::string& filename) {
-//     Dataset dataset;
-//     FileSchema schema;
-//
-//     fs::path filepath = get_data_path() / filename;
-//     std::ifstream file(filepath, std::ios::binary); // binary part prevents text translation (problems with \n in Windows)
-//     if (!file) {
-//         throw std::runtime_error("Cannot open binary file: " + filename);
-//     }
-//
-//     // Helper function to read strings with length prefix
-//     auto read_string = [&file]() {
-//         int32_t length; // reserve 4 bytes of memory
-//         file.read(reinterpret_cast<char*>(&length), sizeof(length)); // treat the memory address of length as a pointer to bytes. Reads exactly 4 bytes into length
-//         if (length <= 0 || length > 1000) { // Sanity check
-//             throw std::runtime_error("Invalid string length in binary file");
-//         }
-//         std::string str(length, '\0'); // create a string with length characters, and initialize them all to null
-//         file.read(&str[0], length);
-//         return str;
-//     };
-//
-//     try {
-//         // Read column count
-//         int32_t column_count;
-//         file.read(reinterpret_cast<char*>(&column_count), sizeof(column_count)); // first 4 bytes are the column count
-//
-//         // Read schema
-//         for (int i = 0; i < column_count; ++i) { // for every column
-//
-//             // Read the Header
-//             std::string col_name = read_string(); // Next 4 bytes are col_name
-//             std::string col_type = read_string(); // Next 4 bytes are col_type
-//
-//             schema.columns.push_back(col_name);
-//             schema.column_types[col_name] = col_type;
-//         }
-//
-//         // Read data rows
-//         while (file.peek() != EOF) {
-//             DataRow row;
-//             for (const auto& col : schema.columns) { // for every column in schema
-//                 const std::string& type = schema.column_types[col];
-//
-//                 if (type == "int32") {
-//                     int32_t val;
-//                     file.read(reinterpret_cast<char*>(&val), sizeof(val));
-//                     row.push_back(val);
-//                 }
-//                 else if (type == "double") {
-//                     double val;
-//                     file.read(reinterpret_cast<char*>(&val), sizeof(val));
-//                     row.push_back(val);
-//                 }
-//                 else if (type == "string") {
-//                     row.push_back(read_string());
-//                 }
-//                 else {
-//                     throw std::runtime_error("Unknown column type: " + type);
-//                 }
-//             }
-//             dataset.push_back(row);
-//         }
-//     } catch (const std::exception& e) {
-//         throw std::runtime_error("Error reading binary file: " + std::string(e.what()));
-//     }
-//
-//     return {dataset, schema};
-// }
 
 
 // ------------------------------ CSV IMPLEMENTATION ------------------------------ //
@@ -379,6 +213,102 @@ std::pair<Dataset, FileSchema> read_csv_fast(const std::string& filename) {
     }
 
     fclose(f);
+    return {dataset, schema};
+}
+
+constexpr size_t CHUNK_SIZE = 64 * 1024 * 1024; // 64 MB per read
+
+struct ParsedChunk {
+    Dataset data;
+};
+
+
+
+std::pair<Dataset, FileSchema> read_csv_fast_parallel(const std::string& filename, int num_threads) {
+    Dataset dataset;
+
+    FILE* f = fopen((get_data_path() / filename).c_str(), "rb");
+    if (!f) {
+        throw std::runtime_error("Cannot open CSV file: " + filename);
+    }
+
+    // --- Read header ---
+    std::string header;
+    {
+        char buf[4096];
+        if (!fgets(buf, sizeof(buf), f)) {
+            fclose(f);
+            throw std::runtime_error("CSV file is empty");
+        }
+        header = buf;
+    }
+
+    FileSchema schema = detect_schema(header.c_str());
+    schema.build_index();
+    size_t num_columns = schema.columns.size();
+
+    // --- Thread pool style execution ---
+    std::vector<std::future<ParsedChunk>> futures;
+
+    std::vector<char> buffer(CHUNK_SIZE);
+
+    size_t offset = ftell(f);
+
+    while (true) {
+        size_t bytes_read = fread(buffer.data(), 1, CHUNK_SIZE, f);
+        if (bytes_read == 0) break;
+
+        // ensure we end on a newline, otherwise backtrack
+        size_t end = bytes_read;
+        while (end > 0 && buffer[end - 1] != '\n') {
+            --end;
+        }
+        fseek(f, static_cast<long>(end - bytes_read), SEEK_CUR);
+
+        // Copy the chunk into a separate buffer to hand off to thread
+        auto chunk_data = std::make_shared<std::vector<char>>(buffer.begin(), buffer.begin() + end);
+
+        // Dispatch parse task
+        futures.push_back(std::async(std::launch::async, [chunk_data, num_columns]() -> ParsedChunk {
+            ParsedChunk result;
+            result.data.reserve(1'000'000);
+
+            char* data = chunk_data->data();
+            char* line_start = data;
+            std::vector<int32_t> row;
+            row.reserve(num_columns);
+
+            for (size_t i = 0; i < chunk_data->size(); i++) {
+                if (data[i] == '\n' || data[i] == '\0') {
+                    char* p = line_start;
+                    row.clear();
+                    for (size_t col = 0; col < num_columns; col++) {
+                        char* start = p;
+                        while (*p != ',' && *p != '\n' && *p != '\r' && *p != '\0') ++p;
+                        char* end = p;
+                        while (end > start && (end[-1] == '\r' || end[-1] == '\n')) --end;
+                        row.push_back(fast_atoi(start, end));
+                        if (*p == ',') ++p;
+                    }
+                    while (row.size() < num_columns) row.push_back(0);
+                    result.data.push_back(row);
+                    line_start = data + i + 1;
+                }
+            }
+            return result;
+        }));
+    }
+
+    fclose(f);
+
+    // Merge results
+    for (auto& fut : futures) {
+        ParsedChunk chunk = fut.get();
+        dataset.insert(dataset.end(),
+                       std::make_move_iterator(chunk.data.begin()),
+                       std::make_move_iterator(chunk.data.end()));
+    }
+
     return {dataset, schema};
 }
 

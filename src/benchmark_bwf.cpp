@@ -94,10 +94,10 @@ private:
             {"official_duckdb_test/input3.csv", "official_duckdb_test/probe3.csv"},
             {"official_duckdb_test/input4.csv", "official_duckdb_test/probe4.csv"}
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -128,10 +128,10 @@ private:
             {"small_partitions/input3.csv", "small_partitions/probe3.csv"},
             {"small_partitions/input4.csv", "small_partitions/probe4.csv"}
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -162,10 +162,10 @@ private:
             {"A3/input3.csv", "A3/probe3.csv"}, // 1000 x 1000
             {"A3/input4.csv", "A3/probe4.csv"} // 3200 x 3200
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -196,10 +196,10 @@ private:
             {"B1/input3.csv", "B1/probe3.csv"}, // 1000x1000 vs 100x1000
             {"B1/input4.csv", "B1/probe4.csv"} // 3200x3200 vs 320x3200
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -230,10 +230,10 @@ private:
             {"B2/input3.csv", "B2/probe3.csv"}, // 100x1000 vs 1000x1000
             {"B2/input4.csv", "B2/probe4.csv"} // 320x3200 vs 3200x3200
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -264,10 +264,10 @@ private:
             {"C1/input3.csv", "C1/probe3.csv"}, // 1000x1000
             {"C1/input4.csv", "C1/probe4.csv"} // 3200x3200
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -298,10 +298,10 @@ private:
             {"D1/input3.csv", "D1/probe3.csv"}, // 100x10000, Window Size: 8000
             {"D1/input4.csv", "D1/probe4.csv"} // 100x100000, Window Size: 80000
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -332,10 +332,10 @@ private:
             {"D2/input3.csv", "D2/probe3.csv"}, // 100x10000, Window Size: 10-12
             {"D2/input4.csv", "D2/probe4.csv"} // 100x100000, Window Size: 10-12
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -366,10 +366,10 @@ private:
             {"many_partitioning_cols/input3.csv", "many_partitioning_cols/probe3.csv"}, // 100x10000, Partitions: 10x10
             {"many_partitioning_cols/input4.csv", "many_partitioning_cols/probe4.csv"} // 100x100000, Partitions: 10x10
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -398,8 +398,10 @@ private:
             {"quick_test/input1.csv", "quick_test/probe1.csv"} // 1 x 10000000
         };
 
-        auto [input, input_schema] = read_csv_fast(files[0].first);
-        auto [probe, probe_schema] = read_csv_fast(files[0].second);
+        int num_threads = std::thread::hardware_concurrency();
+
+        auto [input, input_schema] = read_csv_fast_parallel(files[0].first, num_threads);
+        auto [probe, probe_schema] = read_csv_fast_parallel(files[0].second, num_threads);
 
         for (int i = 0; i < 5; i++) {
             std::cout << "Starting Run: " << i << "\n";
@@ -429,17 +431,28 @@ private:
             {"Z1/input8.csv", "Z1/probe8.csv"},
             {"Z1/input11.csv", "Z1/probe11.csv"},
             {"Z1/input9.csv", "Z1/probe9.csv"},
+            {"Z1/input15.csv", "Z1/probe15.csv"},
+            {"Z1/input19.csv", "Z1/probe19.csv"},
             {"Z1/input12.csv", "Z1/probe12.csv"},
+            {"Z1/input20.csv", "Z1/probe20.csv"},
+            {"Z1/input21.csv", "Z1/probe21.csv"},
             {"Z1/input10.csv", "Z1/probe10.csv"},
             {"Z1/input13.csv", "Z1/probe13.csv"},
-            {"Z1/input14.csv", "Z1/probe14.csv"}
+            {"Z1/input22.csv", "Z1/probe22.csv"},
+            {"Z1/input14.csv", "Z1/probe14.csv"},
+            {"Z1/input23.csv", "Z1/probe23.csv"},
+            {"Z1/input24.csv", "Z1/probe24.csv"},
+            {"Z1/input25.csv", "Z1/probe25.csv"},
+            {"Z1/input17.csv", "Z1/probe17.csv"}
+            // {"Z1/input18.csv", "Z1/probe18.csv"}
         };
-
+        int num_threads = std::thread::hardware_concurrency();
+        
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
-            std::cout <<  "\n\n";
+            std::cout << "\n\n";
 
             if (algo_ind == 1) {
                 BinaryWindowFunctionModel model = create_test_model(1);
@@ -471,13 +484,17 @@ private:
             {"Z2/input6.csv", "Z2/probe6.csv"},
             {"Z2/input7.csv", "Z2/probe7.csv"},
             {"Z2/input8.csv", "Z2/probe8.csv"},
+            {"Z2/input11.csv", "Z2/probe11.csv"},
             {"Z2/input9.csv", "Z2/probe9.csv"},
-            {"Z2/input10.csv", "Z2/probe10.csv"}
+            {"Z2/input12.csv", "Z2/probe12.csv"},
+            {"Z2/input10.csv", "Z2/probe10.csv"},
+            {"Z2/input13.csv", "Z2/probe13.csv"},
+            {"Z2/input14.csv", "Z2/probe14.csv"}
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -511,13 +528,17 @@ private:
             {"Z3/input6.csv", "Z3/probe6.csv"},
             {"Z3/input7.csv", "Z3/probe7.csv"},
             {"Z3/input8.csv", "Z3/probe8.csv"},
+            {"Z3/input11.csv", "Z3/probe11.csv"},
             {"Z3/input9.csv", "Z3/probe9.csv"},
-            {"Z3/input10.csv", "Z3/probe10.csv"}
+            {"Z3/input12.csv", "Z3/probe12.csv"},
+            {"Z3/input10.csv", "Z3/probe10.csv"},
+            {"Z3/input13.csv", "Z3/probe13.csv"},
+            {"Z3/input14.csv", "Z3/probe14.csv"}
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -554,10 +575,10 @@ private:
             {"Z1/input9.csv", "Z1/probe9_1.csv"},
             {"Z1/input10.csv", "Z1/probe10_1.csv"}
         };
-
+        int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
-            auto [input, input_schema] = read_csv_fast(files[i].first);
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 
@@ -599,9 +620,13 @@ private:
             {"Z4/input1.csv", "Z4/probe14.csv"}
         };
 
-        auto [input, input_schema] = read_csv_fast(files[0].first);
+        int num_threads = std::thread::hardware_concurrency();
+
+        auto [input, input_schema] = read_csv_fast_parallel(files[0].first, num_threads);
+
+
         for (int i = 0; i < files.size(); i++) {
-            auto [probe, probe_schema] = read_csv_fast(files[i].second);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
 
             std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
 

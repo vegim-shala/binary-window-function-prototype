@@ -11,15 +11,23 @@ using namespace std;
 int main() {
     cout << "START PROCESSING:" << endl;
 
-    auto [input, input_schema] = read_csv_fast("Z1/input1.csv");
-    auto [probe, probe_schema] = read_csv_fast("Z1/probe1.csv");
+    int num_threads = std::thread::hardware_concurrency();
+
+    auto start_reading = std::chrono::high_resolution_clock::now();
+
+    auto [input, input_schema] = read_csv_fast_parallel("Z1/input1.csv", num_threads);
+    auto [probe, probe_schema] = read_csv_fast_parallel("Z1/probe1.csv", num_threads);
     // verify_binary_file("dynamic_columns.bin");
     // auto [data, schema] = read_binary("sensor.bin");
 
-    cout << "Input: " << endl;
-    print_dataset(input, input_schema, 100);
-    cout << "Probe: " << endl;
-    print_dataset(probe, probe_schema, 100);
+    auto end_reading = std::chrono::high_resolution_clock::now();
+    auto duration_reading = std::chrono::duration_cast<std::chrono::milliseconds>(end_reading - start_reading);
+    std::cout << "Time taken for READING: " << duration_reading.count() << " ms" << std::endl;
+
+    // cout << "Input: " << endl;
+    // print_dataset(input, input_schema, 100);
+    // cout << "Probe: " << endl;
+    // print_dataset(probe, probe_schema, 100);
 
     BinaryWindowFunctionModel model;
     // BinaryWindowFunctionModel2 model;

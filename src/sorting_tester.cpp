@@ -218,68 +218,157 @@ void debug_bias() {
     }
 }
 
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <string>
+#include <random>
+#include <filesystem>
+#include <unordered_set>
+
+namespace fs = std::filesystem;
+
 int main() {
-    // Create a vector with 10 million elements (1e7 is 10 million, 1e6 is 1 million) and fill it with random integers
-    const int size = 1e7;
-    std::vector<size_t> data(size);
-    std::generate(data.begin(), data.end(), std::rand);
-
-    // Divide every element by size to reduce the range of values for counting sort
-    // for (auto& num : data) {
-    //     num = num % (size/1000); // Reduce range to 0-999 for counting sort
-    // }
-
-    // Time the sorting
-    auto start = std::chrono::high_resolution_clock::now();
-
-    // Sort the vector
-    // basic_sort(data);
-    // qsort(data);
-    // stable_sort(data);
-    // radix_sort(data);
-    // counting_sort(data);
-    // ips2ra_sort(data);
-    ips2ra_parallel_sort(data);
-    // ips4o_sort(data);
-    // ips4o_parallel_sort(data);
-
-    // Stop the timer
-    auto end = std::chrono::high_resolution_clock::now();
-
-    // Calculate the duration in milliseconds
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-    // Print the result
-    std::cout << "Time taken to sort " << size << " integers: " << duration.count() << " milliseconds" << std::endl;
-
-    // Test your current (broken) partitioning:
-    Dataset test_data = {
-        { -5, 100 },
-        { -1, 200 },
-        { 0, 300 },
-        { 1, 400 },
-        { 5, 500 },
-        { -10, 600 }
+    std::string folder_name = "Z1";
+    std::vector<int> test_index_list = {
+        // 15,16,17,
+        // 18,19,20,21,22,
+        // 23,
+        // ,24,
+        25
     };
 
-    std::cout << "Original dataset:\n";
-    for (const auto& row : test_data) {
-        std::cout << "[" << row[0] << ", " << row[1] << "]\n";
-    }
+    int N_PARTITIONS = 1;
+    std::vector<long long> ROWS_PER_PART_LIST = {
+        // 6'000'000, 80'000'000, 100'000'000,
+        // 200'000'000, 7'000'000, 8'000'000, 9'000'000, 30'000'000,
+        // 50'000'000,
+        // , 60'000'000,
+        80'000'000
+    };
+    std::vector<long long> PROBES_PER_PART_LIST = ROWS_PER_PART_LIST; // identical in your Python code
 
-    // Create a simple schema for testing
-    FileSchema schema;
-    schema.add_column("value", "int32");
-    schema.add_column("other", "int32");
-    schema.build_index();
+    // Random engine
+    std::random_device rd;
+    std::mt19937_64 gen(rd());
+    std::uniform_int_distribution<int> value_dist(1, 100);
 
-    // Sort by first column
-    ips2ra_parallel_sort2(test_data, schema, "value", 0);
+    std::string base_path = "/Users/vegimshala/CLionProjects/binary-window-function-prototype/data/" + folder_name;
+    fs::create_directories(base_path);
 
-    std::cout << "\nSorted dataset:\n";
-    for (const auto& row : test_data) {
-        std::cout << "[" << row[0] << ", " << row[1] << "]\n";
+    for (size_t idx = 0; idx < test_index_list.size(); idx++) {
+        int test_index = test_index_list[idx];
+        long long ROWS_PER_PART = ROWS_PER_PART_LIST[idx];
+        long long PROBES_PER_PART = PROBES_PER_PART_LIST[idx];
+
+        std::cout << "Running test_index=" << test_index
+                  << " with ROWS_PER_PART=" << ROWS_PER_PART << std::endl;
+
+        // --- Generate input.csv ---
+        std::string input_file = base_path + "/input" + std::to_string(test_index) + ".csv";
+        std::ofstream input_out(input_file);
+        input_out << "category,timestamp,value\n";
+
+        for (int cat = 0; cat < N_PARTITIONS; cat++) {
+            // Instead of shuffling the entire huge list, generate random timestamps on the fly
+            std::uniform_int_distribution<long long> ts_dist(1, ROWS_PER_PART);
+            for (long long r = 0; r < ROWS_PER_PART; r++) {
+                long long t = ts_dist(gen);
+                int value = value_dist(gen);
+                input_out << cat << "," << t << "," << value << "\n";
+            }
+        }
+        input_out.close();
+        std::cout << "Wrote input" << test_index << ".csv" << std::endl;
+
+        // --- Generate probe.csv ---
+        std::string probe_file = base_path + "/probe" + std::to_string(test_index) + ".csv";
+        std::ofstream probe_out(probe_file);
+        probe_out << "category,begin_col,end_col\n";
+
+        for (int cat = 0; cat < N_PARTITIONS; cat++) {
+            std::unordered_set<std::string> seen;
+            std::uniform_int_distribution<long long> start_dist(1, ROWS_PER_PART - 10);
+            std::uniform_int_distribution<long long> len_dist(5, ROWS_PER_PART);
+
+            while ((long long)seen.size() < PROBES_PER_PART) {
+                long long start = start_dist(gen);
+                long long end = start + len_dist(gen);
+                std::string key = std::to_string(start) + "-" + std::to_string(end);
+                if (seen.insert(key).second) {
+                    probe_out << cat << "," << start << "," << end << "\n";
+                }
+            }
+        }
+        probe_out.close();
+        std::cout << "Wrote probe" << test_index << ".csv" << std::endl;
     }
 
     return 0;
 }
+
+// int main() {
+//     // Create a vector with 10 million elements (1e7 is 10 million, 1e6 is 1 million) and fill it with random integers
+//     const int size = 1e7;
+//     std::vector<size_t> data(size);
+//     std::generate(data.begin(), data.end(), std::rand);
+//
+//     // Divide every element by size to reduce the range of values for counting sort
+//     // for (auto& num : data) {
+//     //     num = num % (size/1000); // Reduce range to 0-999 for counting sort
+//     // }
+//
+//     // Time the sorting
+//     auto start = std::chrono::high_resolution_clock::now();
+//
+//     // Sort the vector
+//     // basic_sort(data);
+//     // qsort(data);
+//     // stable_sort(data);
+//     // radix_sort(data);
+//     // counting_sort(data);
+//     // ips2ra_sort(data);
+//     ips2ra_parallel_sort(data);
+//     // ips4o_sort(data);
+//     // ips4o_parallel_sort(data);
+//
+//     // Stop the timer
+//     auto end = std::chrono::high_resolution_clock::now();
+//
+//     // Calculate the duration in milliseconds
+//     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+//
+//     // Print the result
+//     std::cout << "Time taken to sort " << size << " integers: " << duration.count() << " milliseconds" << std::endl;
+//
+//     // Test your current (broken) partitioning:
+//     Dataset test_data = {
+//         { -5, 100 },
+//         { -1, 200 },
+//         { 0, 300 },
+//         { 1, 400 },
+//         { 5, 500 },
+//         { -10, 600 }
+//     };
+//
+//     std::cout << "Original dataset:\n";
+//     for (const auto& row : test_data) {
+//         std::cout << "[" << row[0] << ", " << row[1] << "]\n";
+//     }
+//
+//     // Create a simple schema for testing
+//     FileSchema schema;
+//     schema.add_column("value", "int32");
+//     schema.add_column("other", "int32");
+//     schema.build_index();
+//
+//     // Sort by first column
+//     ips2ra_parallel_sort2(test_data, schema, "value", 0);
+//
+//     std::cout << "\nSorted dataset:\n";
+//     for (const auto& row : test_data) {
+//         std::cout << "[" << row[0] << ", " << row[1] << "]\n";
+//     }
+//
+//     return 0;
+// }
