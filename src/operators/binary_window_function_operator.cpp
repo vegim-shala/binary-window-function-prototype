@@ -673,16 +673,12 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     // Stage 3: Build the worklist => the partitions to process
     auto worklist = build_worklist(input_idx_partitions, probe_idx_partitions);
 
-    // std::cout << "build_worklist: " << std::endl;
-
     // Stage 4: Process the partitions in parallel using the thread pool
     if (worklist.size() == 1) {
-        // cout << "Only one partition to process, processing inline." << endl;
         auto [in_inds, pr_inds] = std::move(worklist[0]);
         process_partition(std::move(in_inds), std::move(pr_inds),
                           input, probe, input_schema, probe_schema,
                           result, result_mtx, pool, morsel_size);
-        // return
     } else {
         process_worklist(worklist, input, probe, input_schema, probe_schema,
                          result, result_mtx, pool, batch_size, partition_morsel_size); // current path
@@ -719,90 +715,51 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute_sequential(
     FileSchema probe_schema
 ) {
     Dataset result;
-    result.reserve(probe.size()); // same as parallel
-    std::mutex result_mtx; // unused in sequential, but keep for interface symmetry
+    result.reserve(probe.size());
+    std::mutex result_mtx; // still needed if result is shared, but in sequential you could drop it
 
     auto total_start = std::chrono::high_resolution_clock::now();
 
-    // auto start_precompute = std::chrono::high_resolution_clock::now();
-    //
-    // // Precompute global keys for ordering
-    // global_keys.reserve(input.size());
-    //
-    // const size_t order_idx = input_schema.index_of(spec.order_column);
-    // for (size_t row_id = 0; row_id < input.size(); ++row_id) {
-    //     global_keys[row_id] = static_cast<uint32_t>(input[row_id][order_idx]) ^ (1UL << 31);
-    // }
-    //
-    // auto end_precompute = std::chrono::high_resolution_clock::now();
-    // std::cout << "[SEQ] Precompute global keys wall time: "
-    //         << std::chrono::duration_cast<std::chrono::milliseconds>(end_precompute - start_precompute).count()
-    //         << " ms" << std::endl;
+    auto partition_start = std::chrono::high_resolution_clock::now();
 
-    // Stage 1: Pre-partition input and probe datasets
-    auto part_start = std::chrono::high_resolution_clock::now();
-    auto input_idx_partitions = PartitionUtils::partition_indices_parallel(
-        input, input_schema, spec.partition_columns,
-        1, 2048, 8 // force 1 thread since sequential
-    );
-    auto probe_idx_partitions = PartitionUtils::partition_indices_parallel(
-        probe, probe_schema, spec.partition_columns,
-        1, 2048, 8
-    );
-    auto part_end = std::chrono::high_resolution_clock::now();
-    std::cout << "[SEQ] Partitioning wall time: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(part_end - part_start).count()
-            << " ms" << std::endl;
+    // Stage 1: Partitioning (still parallel, or could add a sequential variant if needed)
+    auto input_idx_partitions = PartitionUtils::partition_indices_sequential(
+        input, input_schema, spec.partition_columns);
+    auto probe_idx_partitions = PartitionUtils::partition_indices_sequential(
+        probe, probe_schema, spec.partition_columns);
 
-    // Stage 2: Build the worklist => the partitions to process
+    auto partition_end = std::chrono::high_resolution_clock::now();
+    std::cout << "Partitioning wall time: "
+              << std::chrono::duration_cast<std::chrono::microseconds>(partition_end - partition_start).count()
+              << " ms" << std::endl;
+
     auto join_start = std::chrono::high_resolution_clock::now();
+
+    // Stage 2: Build worklist
     auto worklist = build_worklist(input_idx_partitions, probe_idx_partitions);
 
-    // Stage 3: Process the partitions sequentially
-    process_worklist_sequential(worklist, input, probe,
-                                input_schema, probe_schema,
-                                result, result_mtx);
+    // Stage 3: Sequential processing of all partitions
+    for (auto &[in_inds, pr_inds] : worklist) {
+        process_partition_sequential(std::move(in_inds), std::move(pr_inds),
+                                     input, probe, input_schema, probe_schema,
+                                     result, result_mtx);
+    }
 
     auto join_end = std::chrono::high_resolution_clock::now();
-    std::cout << "[SEQ] Join wall time: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(join_end - join_start).count()
-            << " ms" << std::endl;
+    std::cout << "Join wall time: "
+              << std::chrono::duration_cast<std::chrono::microseconds>(join_end - join_start).count()
+              << " ms" << std::endl;
 
     auto total_end = std::chrono::high_resolution_clock::now();
-    std::cout << "[SEQ] Total execute() wall time: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count()
-            << " ms" << std::endl;
+    std::cout << "Total execute_sequential() wall time: "
+              << std::chrono::duration_cast<std::chrono::microseconds>(total_end - total_start).count()
+              << " ms" << std::endl;
 
-    // Stage 4: Append output column to probe schema
+    // Stage 4: Append output column
     probe_schema.add_column(spec.output_column, "double");
     return {std::move(result), probe_schema};
 }
 
-/**
- * @brief Sequential variant of process_worklist (no thread pool).
- *
- * Iterates partitions in the worklist and processes them one by one.
- * This avoids any oversubscription and makes it easier to debug.
- */
-void BinaryWindowFunctionOperator::process_worklist_sequential(
-    std::vector<std::pair<PartitionUtils::IndexDataset, PartitionUtils::IndexDataset> > &worklist,
-    Dataset &input,
-    Dataset &probe,
-    FileSchema &input_schema,
-    FileSchema &probe_schema,
-    Dataset &result,
-    std::mutex &result_mtx // unused, but kept for signature symmetry
-) const {
-    for (auto &pair: worklist) {
-        PartitionUtils::IndexDataset in_inds = std::move(pair.first);
-        PartitionUtils::IndexDataset pr_inds = std::move(pair.second);
-
-        // Call sequential partition processor
-        process_partition_sequential(std::move(in_inds), std::move(pr_inds),
-                                     input, probe, input_schema, probe_schema,
-                                     result);
-    }
-}
 
 /**
  * @brief Sequential variant of process_partition (no morsel parallelism).
@@ -817,514 +774,34 @@ void BinaryWindowFunctionOperator::process_partition_sequential(
     const Dataset &probe,
     const FileSchema &input_schema,
     const FileSchema &probe_schema,
-    Dataset &result
+    Dataset &result,
+    std::mutex &result_mtx
 ) const {
-    // Stage 1: Sort input partition by order column
+    if (pr_indices.empty() || in_indices.empty()) return;
+
+    // Sort input partition
     const size_t order_idx = input_schema.index_of(spec.order_column);
     SortUtils::sort_dataset_indices(input, in_indices, order_idx);
-    // SortUtils::sort_dataset_global_keys(global_keys, in_indices);
 
-    auto start_building_index = std::chrono::high_resolution_clock::now();
-
-    // Stage 2: Build keys + values arrays
+    // Build prefix sums index
     const size_t value_idx = input_schema.index_of(spec.value_column);
-
     std::vector<uint32_t> keys, values;
     keys.reserve(in_indices.size());
     values.reserve(in_indices.size());
 
-    for (size_t idx: in_indices) {
-        keys.emplace_back(static_cast<uint32_t>(input[idx][order_idx]));
-        values.emplace_back(static_cast<uint32_t>(input[idx][value_idx]));
+    for (size_t idx : in_indices) {
+        keys.push_back(static_cast<uint32_t>(input[idx][order_idx]));
+        values.push_back(static_cast<uint32_t>(input[idx][value_idx]));
     }
 
-    // Stage 3: Build segment tree
     JoinUtils local_join(spec.join_spec, spec.order_column);
-    local_join.build_index_from_vectors_segtree(keys, values);
+    local_join.build_index_from_vectors_prefix_sums(keys, values);
 
-    // auto end_building_index = std::chrono::high_resolution_clock::now();
-    // auto duration_building_index = std::chrono::duration_cast<std::chrono::milliseconds>(
-    //     end_building_index - start_building_index);
-    // std::cout << "Time taken for BUILDING INDEX: " << duration_building_index.count() << " ms" << std::endl;
+    // Always inline → call the interleaving probe variant
+    auto local_out = process_probe_morsel_sort_probe_interleaving(
+        0, pr_indices.size(), pr_indices, probe, probe_schema, keys, local_join);
 
-    auto start_partition_process = std::chrono::high_resolution_clock::now();
-    // Stage 4: Probe partition sequentially
-    process_probe_partition_inline_sequential(pr_indices, probe, probe_schema,
-                                              keys, local_join, result,
-                                              *(new std::mutex())); // dummy mutex, never contended
-
-    // auto end_partition_process = std::chrono::high_resolution_clock::now();
-    // auto duration_partition_process = std::chrono::duration_cast<std::chrono::milliseconds>(
-    //     end_partition_process - start_partition_process);
-    // std::cout << "Time taken for PARTITION PROCESSING: " << duration_partition_process.count() << " ms" << std::endl;
+    // Append to result (mutex not really necessary here if only 1 thread)
+    std::lock_guard<std::mutex> lk(result_mtx);
+    std::move(local_out.begin(), local_out.end(), std::back_inserter(result));
 }
-
-void BinaryWindowFunctionOperator::process_probe_partition_inline_sequential(
-    const PartitionUtils::IndexDataset &pr_indices,
-    const Dataset &probe,
-    const FileSchema &probe_schema,
-    const std::vector<uint32_t> &keys,
-    JoinUtils &local_join,
-    Dataset &result,
-    std::mutex &result_mtx
-) const {
-    size_t old_size = result.size();
-    result.reserve(old_size + pr_indices.size()); // ensure enough space
-
-    size_t probe_begin_idx = probe_schema.index_of(spec.join_spec.begin_column);
-    size_t probe_end_idx = probe_schema.index_of(spec.join_spec.end_column);
-
-    for (size_t j = 0; j < pr_indices.size(); ++j) {
-        size_t probe_idx = pr_indices[j];
-        const DataRow &probe_row = probe[probe_idx];
-
-        int32_t start = probe_row[probe_begin_idx];
-        int32_t end = probe_row[probe_end_idx];
-
-        auto lo_it = std::lower_bound(keys.begin(), keys.end(), start);
-        auto hi_it = std::upper_bound(keys.begin(), keys.end(), end);
-
-        size_t lo = lo_it - keys.begin();
-        size_t hi = hi_it - keys.begin();
-
-        if (lo < hi) [[likely]] {
-            uint64_t agg_sum = local_join.seg_query(lo, hi);
-            DataRow out = probe_row;
-            out.emplace_back(agg_sum);
-            result.emplace_back(std::move(out));
-        }
-    }
-}
-
-
-// pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute2(
-//     Dataset &input,
-//     Dataset &probe,
-//     FileSchema input_schema,
-//     FileSchema probe_schema
-// ) {
-//     Dataset result;
-//     result.reserve(probe.size());
-//
-//     auto total_start = std::chrono::high_resolution_clock::now();
-//
-//     // -------------------------
-//     // 1. Sort input by partition + order (DuckDB does this once globally)
-//     // -------------------------
-//     std::vector<size_t> input_idx(input.size());
-//     std::iota(input_idx.begin(), input_idx.end(), 0);
-//
-//     auto order_cols = spec.partition_columns;
-//     order_cols.push_back(spec.order_column);
-//
-//     std::sort(input_idx.begin(), input_idx.end(),
-//               [&](size_t a, size_t b) {
-//                   for (auto &col: order_cols) {
-//                       size_t col_idx = input_schema.index_of(col);
-//                       auto va = extract_numeric(input[a][col_idx]);
-//                       auto vb = extract_numeric(input[b][col_idx]);
-//                       if (va < vb) return true;
-//                       if (va > vb) return false;
-//                   }
-//                   return false;
-//               });
-//
-//     // Pre-extract numeric arrays for efficiency
-//     const size_t order_idx = input_schema.index_of(spec.order_column);
-//     const size_t value_idx = input_schema.index_of(spec.value_column);
-//
-//     std::vector<double> order_vals(input.size());
-//     std::vector<double> value_vals(input.size());
-//     for (size_t i = 0; i < input_idx.size(); i++) {
-//         order_vals[i] = extract_numeric(input[input_idx[i]][order_idx]);
-//         value_vals[i] = extract_numeric(input[input_idx[i]][value_idx]);
-//     }
-//
-//     // -------------------------
-//     // 2. For each probe row, compute its frame [lo, hi)
-//     // -------------------------
-//     const bool has_begin = !spec.join_spec.begin_column.empty();
-//     const bool has_end = !spec.join_spec.end_column.empty();
-//     size_t probe_begin_idx = has_begin ? probe_schema.index_of(spec.join_spec.begin_column) : SIZE_MAX;
-//     size_t probe_end_idx = has_end ? probe_schema.index_of(spec.join_spec.end_column) : SIZE_MAX;
-//
-//     for (const auto &probe_row: probe) {
-//         double start = has_begin
-//                            ? extract_numeric(probe_row[probe_begin_idx])
-//                            : -std::numeric_limits<double>::infinity();
-//         double end = has_end ? extract_numeric(probe_row[probe_end_idx]) : std::numeric_limits<double>::infinity();
-//
-//         auto lo_it = std::lower_bound(order_vals.begin(), order_vals.end(), start);
-//         auto hi_it = std::upper_bound(order_vals.begin(), order_vals.end(), end);
-//         size_t lo = lo_it - order_vals.begin();
-//         size_t hi = hi_it - order_vals.begin();
-//
-//         double agg_sum = 0.0;
-//         for (size_t i = lo; i < hi; i++) {
-//             agg_sum += value_vals[i];
-//         }
-//
-//         DataRow out = probe_row;
-//         out.push_back(agg_sum);
-//         result.emplace_back(std::move(out));
-//     }
-//
-//     auto total_end = std::chrono::high_resolution_clock::now();
-//     std::cout << "Total execute() wall time (DuckDB-style sequential): "
-//             << std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count()
-//             << " ms" << std::endl;
-//
-//     probe_schema.add_column(spec.output_column, "double");
-//     return {std::move(result), probe_schema};
-// }
-//
-// pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute3(
-//     Dataset &input,
-//     Dataset &probe,
-//     FileSchema input_schema,
-//     FileSchema probe_schema
-// ) {
-//     Dataset result;
-//     result.reserve(probe.size());
-//     std::mutex result_mtx;
-//
-//     auto total_start = std::chrono::high_resolution_clock::now();
-//
-//     // -------------------------
-//     // 1. Global sort on input
-//     // -------------------------
-//     std::vector<size_t> input_idx(input.size());
-//     std::iota(input_idx.begin(), input_idx.end(), 0);
-//
-//     // order columns = partition_columns + order_column
-//     auto order_cols = spec.partition_columns;
-//     order_cols.push_back(spec.order_column);
-//
-//     // get column indices once
-//     std::vector<size_t> order_col_indices;
-//     for (auto &col: order_cols) {
-//         order_col_indices.push_back(input_schema.index_of(col));
-//     }
-//
-//     // parallel sort rows in place
-//     ips2ra::parallel::sort(input.begin(), input.end(),
-//                            [&](const DataRow &row) {
-//                                // composite key -> hash it into size_t
-//                                size_t h = 0;
-//                                for (auto col_idx: order_col_indices) {
-//                                    auto v = static_cast<size_t>(extract_numeric(row[col_idx]));
-//                                    h ^= std::hash<size_t>{}(v) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
-//                                }
-//                                return h;
-//                            },
-//                            std::thread::hardware_concurrency() // num threads
-//     );
-//
-//     const size_t order_idx = input_schema.index_of(spec.order_column);
-//     const size_t value_idx = input_schema.index_of(spec.value_column);
-//
-//     std::vector<double> order_vals(input.size());
-//     std::vector<double> value_vals(input.size());
-//     for (size_t i = 0; i < input_idx.size(); i++) {
-//         order_vals[i] = extract_numeric(input[input_idx[i]][order_idx]);
-//         value_vals[i] = extract_numeric(input[input_idx[i]][value_idx]);
-//     }
-//
-//     // -------------------------
-//     // 2. Parallel probe processing
-//     // -------------------------
-//     const bool has_begin = !spec.join_spec.begin_column.empty();
-//     const bool has_end = !spec.join_spec.end_column.empty();
-//     size_t probe_begin_idx = has_begin ? probe_schema.index_of(spec.join_spec.begin_column) : SIZE_MAX;
-//     size_t probe_end_idx = has_end ? probe_schema.index_of(spec.join_spec.end_column) : SIZE_MAX;
-//
-//     size_t pool_size = std::thread::hardware_concurrency();
-//     if (pool_size == 0) pool_size = 2;
-//     ThreadPool pool(pool_size);
-//
-//     size_t morsel_size = 2048; // tune this
-//     std::vector<std::future<std::vector<DataRow> > > futs;
-//
-//     for (size_t mstart = 0; mstart < probe.size(); mstart += morsel_size) {
-//         size_t mend = std::min(mstart + morsel_size, probe.size());
-//
-//         futs.emplace_back(pool.submit([&, mstart, mend]() -> std::vector<DataRow> {
-//             std::vector<DataRow> local_out;
-//             local_out.reserve(mend - mstart);
-//
-//             for (size_t i = mstart; i < mend; i++) {
-//                 const DataRow &probe_row = probe[i];
-//                 double start = has_begin
-//                                    ? extract_numeric(probe_row[probe_begin_idx])
-//                                    : -std::numeric_limits<double>::infinity();
-//                 double end = has_end
-//                                  ? extract_numeric(probe_row[probe_end_idx])
-//                                  : std::numeric_limits<double>::infinity();
-//
-//                 auto lo_it = std::lower_bound(order_vals.begin(), order_vals.end(), start);
-//                 auto hi_it = std::upper_bound(order_vals.begin(), order_vals.end(), end);
-//                 size_t lo = lo_it - order_vals.begin();
-//                 size_t hi = hi_it - order_vals.begin();
-//
-//                 double agg_sum = 0.0;
-//                 for (size_t j = lo; j < hi; j++) {
-//                     agg_sum += value_vals[j];
-//                 }
-//
-//                 DataRow out = probe_row;
-//                 out.push_back(agg_sum);
-//                 local_out.emplace_back(std::move(out));
-//             }
-//
-//             return local_out;
-//         }));
-//     }
-//
-//     for (auto &f: futs) {
-//         auto local_res = f.get();
-//         if (!local_res.empty()) {
-//             std::lock_guard<std::mutex> lk(result_mtx);
-//             std::move(local_res.begin(), local_res.end(), std::back_inserter(result));
-//         }
-//     }
-//
-//     auto total_end = std::chrono::high_resolution_clock::now();
-//     std::cout << "Total execute() wall time (DuckDB-style parallel): "
-//             << std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count()
-//             << " ms" << std::endl;
-//
-//     probe_schema.add_column(spec.output_column, "double");
-//     return {std::move(result), probe_schema};
-// }
-//
-//
-// pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute4(
-//     Dataset &input,
-//     Dataset &probe,
-//     FileSchema input_schema,
-//     FileSchema probe_schema
-// ) {
-//     Dataset result;
-//     result.reserve(probe.size()); // rough reservation
-//     std::mutex result_mtx;
-//
-//     using clk = std::chrono::high_resolution_clock;
-//     auto total_start = clk::now();
-//
-//     // -------------------------
-//     // quick index lookups
-//     // -------------------------
-//     const bool has_begin = !spec.join_spec.begin_column.empty();
-//     const bool has_end = !spec.join_spec.end_column.empty();
-//     const size_t probe_begin_idx = has_begin ? probe_schema.index_of(spec.join_spec.begin_column) : SIZE_MAX;
-//     const size_t probe_end_idx = has_end ? probe_schema.index_of(spec.join_spec.end_column) : SIZE_MAX;
-//     const size_t input_ts_idx = input_schema.index_of(spec.order_column); // timestamp col on input
-//     const size_t input_value_idx = input_schema.index_of(spec.value_column); // value col on input
-//     const size_t probe_cat_idx = probe_schema.index_of(spec.partition_columns.front());
-//     // assume single partition col: category
-//     const size_t input_cat_idx = input_schema.index_of(spec.partition_columns.front());
-//
-//     // Note: for multi-column partitioning you would need a compound key. For clarity, this matches your SQL (category).
-//     // -------------------------
-//     // 1) Build probe-side hash: category -> vector of (begin,end, group_id)
-//     //    Also build mapping group_id -> key triple (category,begin,end)
-//     // -------------------------
-//     auto probe_build_start = clk::now();
-//
-//     struct RangeEntry {
-//         int32_t begin;
-//         int32_t end;
-//         size_t group_id;
-//     };
-//
-//     // category -> vector<RangeEntry>
-//     std::unordered_map<int32_t, std::vector<RangeEntry> > cat_ranges;
-//     // group_id -> tuple(category, begin, end)
-//     struct GroupKey {
-//         int32_t category, begin, end;
-//     };
-//     std::vector<GroupKey> group_keys;
-//     group_keys.reserve(probe.size());
-//
-//     // helper: map exact (category,begin,end) to group_id to remove duplicates
-//     struct Triple {
-//         int32_t c, b, e;
-//         bool operator==(Triple const &o) const { return c == o.c && b == o.b && e == o.e; }
-//     };
-//     struct TripleHash {
-//         size_t operator()(Triple const &t) const noexcept {
-//             // combine three int32s into size_t hash
-//             uint64_t x = (static_cast<uint64_t>(static_cast<uint32_t>(t.c)) << 32)
-//                          ^ (static_cast<uint64_t>(static_cast<uint32_t>(t.b)));
-//             return std::hash<uint64_t>()(x) ^ (static_cast<uint32_t>(t.e) * 0x9e3779b97f4a7c15ULL);
-//         }
-//     };
-//     std::unordered_map<Triple, size_t, TripleHash> triple_to_group;
-//
-//     for (size_t pi = 0; pi < probe.size(); ++pi) {
-//         int32_t cat = static_cast<int32_t>(extract_numeric(probe[pi][probe_cat_idx]));
-//         int32_t b = has_begin
-//                         ? static_cast<int32_t>(extract_numeric(probe[pi][probe_begin_idx]))
-//                         : std::numeric_limits<int32_t>::min();
-//         int32_t e = has_end
-//                         ? static_cast<int32_t>(extract_numeric(probe[pi][probe_end_idx]))
-//                         : std::numeric_limits<int32_t>::max();
-//
-//         Triple t{cat, b, e};
-//         auto itg = triple_to_group.find(t);
-//         size_t gid;
-//         if (itg == triple_to_group.end()) {
-//             gid = group_keys.size();
-//             group_keys.push_back({cat, b, e});
-//             triple_to_group.emplace(t, gid);
-//             cat_ranges[cat].push_back(RangeEntry{b, e, gid});
-//         } else {
-//             gid = itg->second;
-//             // If duplicate probe rows (same triple) exist we still only need one group entry
-//         }
-//     }
-//
-//     size_t num_groups = group_keys.size();
-//     auto probe_build_end = clk::now();
-//     std::cout << "Probe-hash build wall time: "
-//             << std::chrono::duration_cast<std::chrono::milliseconds>(probe_build_end - probe_build_start).count()
-//             << " ms; unique groups: " << num_groups << std::endl;
-//
-//     if (num_groups == 1) {
-//         // single probe optimization
-//         const auto &gk = group_keys[0];
-//         int64_t agg = 0;
-//         bool found = false;
-//
-//         for (size_t i = 0; i < input.size(); i++) {
-//             int32_t cat = (int32_t) extract_numeric(input[i][input_cat_idx]);
-//             if (cat != gk.category) continue;
-//
-//             int32_t ts = (int32_t) extract_numeric(input[i][input_ts_idx]);
-//             if (ts < gk.begin || ts > gk.end) continue;
-//
-//             int32_t val = (int32_t) extract_numeric(input[i][input_value_idx]);
-//             agg += val;
-//             found = true;
-//         }
-//
-//         // output
-//         DataRow out;
-//         out.push_back((double) gk.category);
-//         out.push_back((double) gk.begin);
-//         out.push_back((double) gk.end);
-//         out.push_back(found ? (double) agg : std::numeric_limits<double>::quiet_NaN());
-//         result.push_back(std::move(out));
-//
-//         probe_schema.add_column(spec.output_column, "double");
-//         return {std::move(result), probe_schema};
-//     }
-//
-//
-//     // -------------------------
-//     // 2) Morsel-parallel scan of input:
-//     //    For each input row, lookup cat_ranges[category] (if present) and test timestamp in [begin,end].
-//     //    Each morsel returns local unordered_map<group_id, int64_t> of partial sums.
-//     // -------------------------
-//     auto scan_start = clk::now();
-//
-//     size_t pool_size = std::thread::hardware_concurrency();
-//     if (pool_size == 0) pool_size = 2;
-//     ThreadPool pool(pool_size);
-//     const size_t morsel_size = 16384; // tuneable - larger morsel reduces task overhead for huge input
-//     std::vector<std::future<std::unordered_map<size_t, int64_t> > > futs;
-//
-//     // divide input into contiguous morsels (index-based)
-//     for (size_t mstart = 0; mstart < input.size(); mstart += morsel_size) {
-//         size_t mend = std::min(mstart + morsel_size, input.size());
-//         futs.emplace_back(pool.submit(
-//             [mstart, mend, &input, input_ts_idx, input_value_idx, input_cat_idx, &cat_ranges
-//             ]() -> std::unordered_map<size_t, int64_t> {
-//                 std::unordered_map<size_t, int64_t> local_agg;
-//                 local_agg.reserve(1024);
-//
-//                 for (size_t i = mstart; i < mend; ++i) {
-//                     int32_t cat = static_cast<int32_t>(extract_numeric(input[i][input_cat_idx]));
-//                     auto rit = cat_ranges.find(cat);
-//                     if (rit == cat_ranges.end()) continue; // no probes for this category
-//
-//                     int32_t ts = static_cast<int32_t>(extract_numeric(input[i][input_ts_idx]));
-//                     int32_t val = static_cast<int32_t>(extract_numeric(input[i][input_value_idx]));
-//
-//                     // linear scan of ranges for this category (simple & duckdb-like)
-//                     auto &vec = rit->second;
-//                     for (const RangeEntry &re: vec) {
-//                         if ((uint32_t) (re.begin) <= (uint32_t) (ts) && (uint32_t) (ts) <= (uint32_t) (re.end)) {
-//                             local_agg[re.group_id] += static_cast<int64_t>(val);
-//                         }
-//                     }
-//                 }
-//
-//                 return local_agg;
-//             }));
-//     }
-//
-//     // collect all futures and merge into global_agg
-//     std::unordered_map<size_t, int64_t> global_agg;
-//     global_agg.reserve(num_groups ? std::min<size_t>(num_groups, 1 << 20) : 0);
-//
-//     for (auto &f: futs) {
-//         auto local = f.get();
-//         for (auto &kv: local) {
-//             global_agg[kv.first] += kv.second;
-//         }
-//     }
-//
-//     auto scan_end = clk::now();
-//     std::cout << "Input scan + local aggregation wall time: "
-//             << std::chrono::duration_cast<std::chrono::milliseconds>(scan_end - scan_start).count()
-//             << " ms" << std::endl;
-//
-//     // -------------------------
-//     // 3) Merge is already done above (we merged as futures finished). If you want per-thread merge profiling:
-//     // -------------------------
-//     // (Already implicit) — print merged size
-//     std::cout << "Merged groups with non-zero sum: " << global_agg.size() << std::endl;
-//
-//     // -------------------------
-//     // 4) Assemble final result: one row per group (category, begin, end, SUM)
-//     //    If a group does not exist in global_agg => no matching input rows => SQL SUM(NULL).
-//     //    We use NaN to represent NULL here. Change to -1.0 if you prefer.
-//     // -------------------------
-//     auto assemble_start = clk::now();
-//
-//     for (size_t gid = 0; gid < group_keys.size(); ++gid) {
-//         const GroupKey &gk = group_keys[gid];
-//         DataRow out;
-//         // push category, begin, end as numeric values (maintain same types you used elsewhere)
-//         out.push_back(static_cast<double>(gk.category));
-//         out.push_back(static_cast<double>(gk.begin));
-//         out.push_back(static_cast<double>(gk.end));
-//
-//         auto it = global_agg.find(gid);
-//         double sum_out;
-//         if (it == global_agg.end()) {
-//             // no matching input rows -> SQL SUM = NULL -> represent as NaN
-//             sum_out = std::numeric_limits<double>::quiet_NaN();
-//         } else {
-//             sum_out = static_cast<double>(it->second);
-//         }
-//
-//         out.push_back(sum_out);
-//         result.emplace_back(std::move(out));
-//     }
-//
-//     auto assemble_end = clk::now();
-//     std::cout << "Assemble result wall time: "
-//             << std::chrono::duration_cast<std::chrono::milliseconds>(assemble_end - assemble_start).count()
-//             << " ms" << std::endl;
-//
-//     auto total_end = clk::now();
-//     std::cout << "Total execute() wall time: "
-//             << std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count()
-//             << " ms" << std::endl;
-//
-//     // extend schema and return - match DuckDB projection: category, begin_col, end_col, sum_value
-//     probe_schema.add_column(spec.output_column, "double"); // appended column
-//     return {std::move(result), probe_schema};
-// }

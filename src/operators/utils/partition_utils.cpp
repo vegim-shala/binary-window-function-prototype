@@ -8,7 +8,9 @@
 #include <unordered_map>
 #include <string>
 #include <atomic>
+#include <iostream>
 #include <numeric>
+#include <ips2ra/ips2ra.hpp>
 
 using namespace PartitionUtils;
 
@@ -193,13 +195,11 @@ SingleKeyIndexMap PartitionUtils::radix_buckets_to_partitions_sequential(
     // Option A (one-pass, may reallocate vectors): fastest in practice for many real datasets
     SingleKeyIndexMap out;
     // A light heuristic reserve: number of non-empty buckets
-    size_t non_empty = 0;
-    for (auto &b: buckets) if (!b.empty()) ++non_empty;
-    out.reserve(non_empty * 2);
+    out.reserve(buckets.size());
 
-    for (auto &bucket: buckets) {
-        for (size_t row_idx: bucket) {
-            int32_t key = dataset[row_idx][col_idx];
+    for (auto &bucket: buckets) { // for every bucket
+        for (size_t row_idx: bucket) { // for every row in the bucket
+            int32_t key = dataset[row_idx][col_idx]; // extract the key
             auto &vec = out[key];
             if (vec.empty()) vec.reserve(64);
             vec.push_back(row_idx);
@@ -267,8 +267,20 @@ PartitionIndexResult PartitionUtils::partition_indices_sequential(
     if (partition_columns.size() == 1) {
         // 1-col fast path: radix partition -> compress per key
         auto s = radix_setup(dataset, schema, partition_columns, radix_bits);
+
+        auto start_bucketing = std::chrono::high_resolution_clock::now();
         auto buckets = partition_dataset_radix_sequential(dataset, schema, partition_columns, radix_bits);
+        auto end_bucketing = std::chrono::high_resolution_clock::now();
+        std::cout << "Radix bucketing wall time: "
+                  << std::chrono::duration_cast<std::chrono::microseconds>(end_bucketing - start_bucketing).count()
+                  << " ms" << std::endl;
+
+        auto start_grouping = std::chrono::high_resolution_clock::now();
         auto by_key = radix_buckets_to_partitions_sequential(dataset, s.col_idx, buckets);
+        auto end_grouping = std::chrono::high_resolution_clock::now();
+        std::cout << "Radix grouping wall time: "
+                  << std::chrono::duration_cast<std::chrono::microseconds>(end_grouping - start_grouping).count()
+                  << " ms" << std::endl;
         return by_key; // variant will hold unordered_map<int32_t, IndexDataset>
     } else {
         // multi-col: hash partition (existing sequential)
@@ -293,18 +305,27 @@ PartitionUtils::PartitionIndexResult PartitionUtils::partition_indices_parallel(
 
     if (partition_columns.size() == 1) {
         auto s = radix_setup(dataset, schema, partition_columns, radix_bits);
+
+        auto start_bucketing = std::chrono::high_resolution_clock::now();
         auto buckets = partition_dataset_radix_morsel(
             dataset, schema, partition_columns,
             num_threads, radix_bits, morsel_size
         );
+        auto end_bucketing = std::chrono::high_resolution_clock::now();
+        std::cout << "Radix bucketing wall time: "
+                  << std::chrono::duration_cast<std::chrono::microseconds>(end_bucketing - start_bucketing).count()
+                  << " ms" << std::endl;
+
+        auto start_grouping = std::chrono::high_resolution_clock::now();
         auto by_key = radix_buckets_to_partitions_morsel(dataset, s.col_idx, buckets, num_threads);
+        auto end_grouping = std::chrono::high_resolution_clock::now();
+        std::cout << "Radix grouping wall time: "
+                  << std::chrono::duration_cast<std::chrono::microseconds>(end_grouping - start_grouping).count()
+                  << " ms" << std::endl;
         return by_key;
     } else {
         return partition_dataset_index_morsel(dataset, schema, partition_columns, num_threads, morsel_size);
     }
-
-
-
 }
 
 // This was used to showcase results in the paper for multi-column partitioning with radix hashing.

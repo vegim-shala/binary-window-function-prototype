@@ -29,15 +29,6 @@ public:
     std::pair<Dataset, FileSchema> execute(Dataset &input, Dataset &probe, FileSchema input_schema,
                                            FileSchema probe_schema);
 
-    std::pair<Dataset, FileSchema> execute2(Dataset &input, Dataset &probe, FileSchema input_schema,
-                                            FileSchema probe_schema);
-
-    std::pair<Dataset, FileSchema> execute3(Dataset &input, Dataset &probe, FileSchema input_schema,
-                                            FileSchema probe_schema);
-
-    std::pair<Dataset, FileSchema> execute4(Dataset &input, Dataset &probe, FileSchema input_schema,
-                                            FileSchema probe_schema);
-
     std::pair<Dataset, FileSchema> execute_sequential(
         Dataset &input,
         Dataset &probe,
@@ -50,11 +41,6 @@ private:
     std::unique_ptr<Aggregator> aggregator;
     JoinUtils join_utils;
     std::vector<uint32_t> global_keys;
-
-    std::string extract_partition_key(const DataRow &row) const;
-
-    Dataset probe_parallel(const Dataset &input_partition, const Dataset &probe_partition, const FileSchema &schema,
-                           size_t num_threads);
 
     std::vector<std::pair<PartitionUtils::IndexDataset, PartitionUtils::IndexDataset> > build_worklist(
         auto &input_idx_partitions,
@@ -140,16 +126,6 @@ private:
     ) const;
 
     // ------------------------ These functions are for sequential execution only ------------------------
-    void process_worklist_sequential(
-        std::vector<std::pair<PartitionUtils::IndexDataset, PartitionUtils::IndexDataset> > &worklist,
-        Dataset &input,
-        Dataset &probe,
-        FileSchema &input_schema,
-        FileSchema &probe_schema,
-        Dataset &result,
-        std::mutex &result_mtx // unused, but kept for signature symmetry
-    ) const;
-
     void process_partition_sequential(
         PartitionUtils::IndexDataset in_indices,
         PartitionUtils::IndexDataset pr_indices,
@@ -157,15 +133,6 @@ private:
         const Dataset &probe,
         const FileSchema &input_schema,
         const FileSchema &probe_schema,
-        Dataset &result
-    ) const;
-
-    void process_probe_partition_inline_sequential(
-        const PartitionUtils::IndexDataset &pr_indices,
-        const Dataset &probe,
-        const FileSchema &probe_schema,
-        const std::vector<uint32_t> &keys,
-        JoinUtils &local_join,
         Dataset &result,
         std::mutex &result_mtx
     ) const;

@@ -34,11 +34,12 @@ public:
         // test_A1_very_small_ranges(algo_ind); // D2
         // test_multiple_partitioning_columns(algo_ind); // E1
         // test_huge_single_partition(algo_ind); // E1
-        test_one_partition_scaling(algo_ind); // Z1
+        // test_one_partition_scaling(algo_ind); // Z1
         // test_one_partition_one_range(algo_ind); // Z2
         // test_many_partitions_scaling(algo_ind); // Z3
         // test_one_partition_scaling_one_probe_row(algo_ind); // Z1.1
         // test_probing_scaling(algo_ind); // Z4
+        test_one_partition_scaling_seq(algo_ind); // Z1 seq
 
         std::cout << "\n=== Benchmark Complete ===\n";
     }
@@ -421,9 +422,9 @@ private:
         std::cout << "Z1. Scenario: Testing for arbitrary ranges, one partition of different number of values)\n";
 
         std::vector<std::pair<std::string, std::string> > files = {
-            {"Z1/input1.csv", "Z1/probe1.csv"},
-            {"Z1/input2.csv", "Z1/probe2.csv"},
-            {"Z1/input3.csv", "Z1/probe3.csv"},
+            // {"Z1/input1.csv", "Z1/probe1.csv"},
+            // {"Z1/input2.csv", "Z1/probe2.csv"},
+            // {"Z1/input3.csv", "Z1/probe3.csv"},
             {"Z1/input4.csv", "Z1/probe4.csv"},
             {"Z1/input5.csv", "Z1/probe5.csv"},
             {"Z1/input6.csv", "Z1/probe6.csv"},
@@ -643,6 +644,62 @@ private:
             }
 
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void test_one_partition_scaling_seq(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z1. Scenario: Testing for arbitrary ranges, one partition of different number of values)\n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            // {"Z1/input1.csv", "Z1/probe1.csv"},
+            // {"Z1/input2.csv", "Z1/probe2.csv"},
+            // {"Z1/input3.csv", "Z1/probe3.csv"},
+            {"Z1/input4.csv", "Z1/probe4.csv"},
+            {"Z1/input5.csv", "Z1/probe5.csv"},
+            {"Z1/input6.csv", "Z1/probe6.csv"},
+            {"Z1/input7.csv", "Z1/probe7.csv"},
+            {"Z1/input8.csv", "Z1/probe8.csv"},
+            {"Z1/input11.csv", "Z1/probe11.csv"},
+            {"Z1/input9.csv", "Z1/probe9.csv"},
+            {"Z1/input15.csv", "Z1/probe15.csv"},
+            {"Z1/input19.csv", "Z1/probe19.csv"},
+            {"Z1/input12.csv", "Z1/probe12.csv"},
+            {"Z1/input20.csv", "Z1/probe20.csv"},
+            {"Z1/input21.csv", "Z1/probe21.csv"},
+            {"Z1/input10.csv", "Z1/probe10.csv"},
+            {"Z1/input13.csv", "Z1/probe13.csv"},
+            {"Z1/input22.csv", "Z1/probe22.csv"},
+            {"Z1/input14.csv", "Z1/probe14.csv"},
+            {"Z1/input23.csv", "Z1/probe23.csv"},
+            {"Z1/input24.csv", "Z1/probe24.csv"},
+            {"Z1/input25.csv", "Z1/probe25.csv"},
+            {"Z1/input17.csv", "Z1/probe17.csv"}
+            // {"Z1/input18.csv", "Z1/probe18.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+
+        for (int i = 0; i < files.size(); i++) {
+            std::cout << "Processing number: " << i << "\n";
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
+
+                auto [result, new_schema] = op.execute_sequential(input, probe, input_schema, probe_schema);
+            } else if (algo_ind == 2) {
+                BinaryWindowFunctionModel2 model = create_test_model2(1);
+                BinaryWindowFunctionOperator2 op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
+            // std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }
