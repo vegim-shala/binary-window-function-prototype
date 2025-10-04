@@ -108,17 +108,14 @@ void BinaryWindowFunctionOperator::process_worklist(
 
         for (size_t i = pos; i < endpos; ++i) {
             // for each partition in batch
-            IndexDataset in_inds = std::move(worklist[i].first);
-            IndexDataset pr_inds = std::move(worklist[i].second);
-
             // Pass the partition to the thread pool and process it in parallel
             batch_futs.emplace_back(pool.submit(
-                [this, in_inds = std::move(in_inds), pr_inds = std::move(pr_inds),
+                [this, in_inds = std::move(worklist[i].first), pr_inds = std::move(worklist[i].second),
                     &input, &probe, &input_schema, &probe_schema,
                     &result, &result_mtx, &pool, morsel_size]() mutable {
-                    process_partition(std::move(in_inds), std::move(pr_inds),
-                                      input, probe, input_schema, probe_schema,
-                                      result, result_mtx, pool, morsel_size);
+                    process_partition_new(std::move(in_inds), std::move(pr_inds),
+                                          input, probe, input_schema, probe_schema,
+                                          result, result_mtx, pool, morsel_size);
                 }));
         }
 
@@ -165,13 +162,13 @@ void BinaryWindowFunctionOperator::process_partition(
     // 2. Build keys + values arrays
     const size_t value_idx = input_schema.index_of(spec.value_column);
 
-    std::vector<uint32_t> keys, values;
+    std::vector<int32_t> keys, values;
     keys.reserve(in_indices.size());
     values.reserve(in_indices.size());
 
     for (size_t idx: in_indices) {
-        keys.push_back(static_cast<uint32_t>(input[idx][order_idx]));
-        values.push_back(static_cast<uint32_t>(input[idx][value_idx]));
+        keys.push_back(input[idx][order_idx]);
+        values.push_back(input[idx][value_idx]);
     }
 
 
@@ -193,11 +190,9 @@ void BinaryWindowFunctionOperator::process_partition(
     // 4. Probe partition (parallel or inline)
     if (pr_indices.size() >= morsel_size * 2) {
         // TODO: Tune threshold
-        process_probe_partition_parallel(pr_indices, probe, probe_schema,
-                                         keys, local_join, result, result_mtx, pool, morsel_size);
+        process_probe_partition_parallel(pr_indices, probe, probe_schema, local_join, result, result_mtx, pool, morsel_size);
     } else {
-        process_probe_partition_inline(pr_indices, probe, probe_schema,
-                                       keys, local_join, result, result_mtx);
+        process_probe_partition_inline(pr_indices, probe, probe_schema, local_join, result, result_mtx);
     }
 
     // auto end_partition_processing = std::chrono::high_resolution_clock::now();
@@ -206,6 +201,7 @@ void BinaryWindowFunctionOperator::process_partition(
     // std::cout << "Time taken for PARTITION PROCESSING: " << duration_partition_processing.count() << " ms" << std::endl;
 }
 
+
 /**
  * @brief Probe a partition in parallel by splitting into morsels.
  */
@@ -213,7 +209,6 @@ void BinaryWindowFunctionOperator::process_probe_partition_parallel(
     const PartitionUtils::IndexDataset &pr_indices,
     const Dataset &probe,
     const FileSchema &probe_schema,
-    const std::vector<uint32_t> &keys,
     JoinUtils &local_join,
     Dataset &result,
     std::mutex &result_mtx,
@@ -228,9 +223,8 @@ void BinaryWindowFunctionOperator::process_probe_partition_parallel(
         size_t mend = std::min(mstart + morsel_size, pr_indices.size());
 
         futs.emplace_back(pool.submit(
-            [this, mstart, mend, &pr_indices, &probe, &probe_schema, &keys, &local_join]() mutable {
-                return process_probe_morsel_sort_probe_interleaving(mstart, mend, pr_indices, probe, probe_schema,
-                                                       keys, local_join);
+            [this, mstart, mend, &pr_indices, &probe, &probe_schema, &local_join]() mutable {
+                return process_probe_morsel_sort_probe_interleaving(mstart, mend, pr_indices, probe, probe_schema, local_join);
             }));
     }
 
@@ -251,14 +245,12 @@ void BinaryWindowFunctionOperator::process_probe_partition_inline(
     const PartitionUtils::IndexDataset &pr_indices,
     const Dataset &probe,
     const FileSchema &probe_schema,
-    const std::vector<uint32_t> &keys,
     JoinUtils &local_join,
     Dataset &result,
     std::mutex &result_mtx
 ) const {
     auto local_out = process_probe_morsel_sort_probe_interleaving(0, pr_indices.size(),
-                                                     pr_indices, probe, probe_schema,
-                                                     keys, local_join);
+                                                                  pr_indices, probe, probe_schema, local_join);
     std::lock_guard<std::mutex> lk(result_mtx); // we lock because we process batches in parallel
     // TODO: Can we somehow make this lock-free?
     std::move(local_out.begin(), local_out.end(), std::back_inserter(result));
@@ -538,7 +530,6 @@ std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel_sort_pro
     const PartitionUtils::IndexDataset &pr_indices,
     const Dataset &probe,
     const FileSchema &probe_schema,
-    const std::vector<uint32_t> &keys,
     JoinUtils &local_join
 ) const {
     // ---- 1. Prepare probe tasks ----
@@ -560,33 +551,17 @@ std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel_sort_pro
         tasks.emplace_back(t);
     }
 
-    // ---- 2. Sort tasks by start (cache-friendly probing order) ----
-#ifdef NDEBUG
-    // ---------- FAST PATH (Release build with ips2ra) ----------
-    ips2ra::sort(tasks.begin(), tasks.end(),
-                 [](const ProbeTask &t) {
-                     return static_cast<uint32_t>(t.start) ^ (1UL << 31);
-                 });
-#else
-    // ---------- SAFE PATH (Debug build with std::sort) ----------
-    std::sort(tasks.begin(), tasks.end(),
-              [](const ProbeTask &lhs, const ProbeTask &rhs) {
-                  uint32_t key_lhs = static_cast<uint32_t>(lhs.start) ^ (1UL << 31);
-                  uint32_t key_rhs = static_cast<uint32_t>(rhs.start) ^ (1UL << 31);
-                  return key_lhs < key_rhs;
-              });
-#endif
 
     auto start_probing = std::chrono::high_resolution_clock::now();
 
     // ---- 2.5: Extract probe keys ---
-    std::vector<uint32_t> start_keys, end_keys;
+    std::vector<int32_t> start_keys, end_keys;
     start_keys.reserve(tasks.size());
     end_keys.reserve(tasks.size());
 
-    for (auto &t : tasks) {
-        start_keys.push_back(static_cast<uint32_t>(t.start));
-        end_keys.push_back(static_cast<uint32_t>(t.end));
+    for (auto &t: tasks) {
+        start_keys.push_back(t.start);
+        end_keys.push_back(t.end);
     }
 
     // ---- 3: Batched binary searches ----
@@ -610,6 +585,9 @@ std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel_sort_pro
     // std::cout << "Time taken for PROBING: " << duration_probing.count() << " ns" << std::endl;290097
 
     // ---- 4. Assemble DataRows in original order ----
+    // we need this step because we need to append the aggregate to the probe rows
+    // and we need to do it in the original order of the probe rows ->
+    // We need to do it in the original order because
     std::vector<DataRow> local_out;
     local_out.reserve(mend - mstart);
 
@@ -644,7 +622,8 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     ThreadPool pool(pool_size);
 
     //TODO: Evaluate and tune partition morsel size
-    size_t partition_morsel_size = std::exp2(static_cast<size_t>(std::floor(std::log2(input.size() / 32))));
+    size_t partition_morsel_size = std::min<size_t>(
+        65536, std::exp2(static_cast<size_t>(std::floor(std::log2(input.size() / 32)))));
     // std::cout << "Partition morsel size: " << partition_morsel_size << std::endl;
 
     // Stage 1: Pre-partition input and probe datasets
@@ -665,7 +644,7 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     auto join_start = std::chrono::high_resolution_clock::now();
 
     size_t batch_size = std::max<size_t>(1, pool_size / 2); // leave threads for morsels
-    const size_t morsel_size = 2048; // tuneable
+    // const size_t morsel_size = 2048; // tuneable
     // std::cout << "ThreadPool size: " << pool_size
     //         << ", partition batch size: " << batch_size
     //         << ", morsel_size: " << morsel_size << std::endl;
@@ -679,9 +658,9 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     if (worklist.size() == 1) {
         // cout << "Only one partition to process, processing inline." << endl;
         auto [in_inds, pr_inds] = std::move(worklist[0]);
-        process_partition(std::move(in_inds), std::move(pr_inds),
-                          input, probe, input_schema, probe_schema,
-                          result, result_mtx, pool, morsel_size);
+        process_partition_new(std::move(in_inds), std::move(pr_inds),
+                              input, probe, input_schema, probe_schema,
+                              result, result_mtx, pool, partition_morsel_size);
         // return
     } else {
         process_worklist(worklist, input, probe, input_schema, probe_schema,
@@ -720,46 +699,42 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute_sequential(
 ) {
     Dataset result;
     result.reserve(probe.size());
-    std::mutex result_mtx; // still needed if result is shared, but in sequential you could drop it
 
-    auto total_start = std::chrono::high_resolution_clock::now();
+    const auto total_start = std::chrono::high_resolution_clock::now();
 
-    auto partition_start = std::chrono::high_resolution_clock::now();
-
-    // Stage 1: Partitioning (still parallel, or could add a sequential variant if needed)
+    // --- Stage 1: partition (sequential) ---
+    const auto partition_start = std::chrono::high_resolution_clock::now();
     auto input_idx_partitions = PartitionUtils::partition_indices_sequential(
         input, input_schema, spec.partition_columns);
     auto probe_idx_partitions = PartitionUtils::partition_indices_sequential(
         probe, probe_schema, spec.partition_columns);
-
-    auto partition_end = std::chrono::high_resolution_clock::now();
+    const auto partition_end = std::chrono::high_resolution_clock::now();
     std::cout << "Partitioning wall time: "
               << std::chrono::duration_cast<std::chrono::microseconds>(partition_end - partition_start).count()
-              << " ms" << std::endl;
+              << " ms\n";
 
-    auto join_start = std::chrono::high_resolution_clock::now();
-
-    // Stage 2: Build worklist
+    // --- Stage 2: worklist ---
+    const auto join_start = std::chrono::high_resolution_clock::now();
     auto worklist = build_worklist(input_idx_partitions, probe_idx_partitions);
 
-    // Stage 3: Sequential processing of all partitions
+    // --- Stage 3: process each partition sequentially (new path) ---
     for (auto &[in_inds, pr_inds] : worklist) {
         process_partition_sequential(std::move(in_inds), std::move(pr_inds),
-                                     input, probe, input_schema, probe_schema,
-                                     result, result_mtx);
+                                         input, probe, input_schema, probe_schema,
+                                         result);
     }
 
-    auto join_end = std::chrono::high_resolution_clock::now();
+    const auto join_end = std::chrono::high_resolution_clock::now();
     std::cout << "Join wall time: "
               << std::chrono::duration_cast<std::chrono::microseconds>(join_end - join_start).count()
-              << " ms" << std::endl;
+              << " ms\n";
 
-    auto total_end = std::chrono::high_resolution_clock::now();
+    const auto total_end = std::chrono::high_resolution_clock::now();
     std::cout << "Total execute_sequential() wall time: "
               << std::chrono::duration_cast<std::chrono::microseconds>(total_end - total_start).count()
-              << " ms" << std::endl;
+              << " ms\n";
 
-    // Stage 4: Append output column
+    // --- Stage 4: schema ---
     probe_schema.add_column(spec.output_column, "double");
     return {std::move(result), probe_schema};
 }
@@ -778,34 +753,228 @@ void BinaryWindowFunctionOperator::process_partition_sequential(
     const Dataset &probe,
     const FileSchema &input_schema,
     const FileSchema &probe_schema,
-    Dataset &result,
-    std::mutex &result_mtx
+    Dataset &result
 ) const {
     if (pr_indices.empty() || in_indices.empty()) return;
 
-    // Sort input partition
+    // --- Build-side: sort by ORDER (use your radix-backed SortUtils) ---
     const size_t order_idx = input_schema.index_of(spec.order_column);
     SortUtils::sort_dataset_indices(input, in_indices, order_idx);
 
-    // Build prefix sums index
+    // --- Build prefix sums index from sorted indices (signed keys, int64 prefix) ---
     const size_t value_idx = input_schema.index_of(spec.value_column);
-    std::vector<uint32_t> keys, values;
-    keys.reserve(in_indices.size());
-    values.reserve(in_indices.size());
+    JoinUtils local_join(spec.join_spec, spec.order_column);
+    local_join.build_prefix_sums_from_sorted_indices(
+        input, input_schema, in_indices, order_idx, value_idx);
 
-    for (size_t idx : in_indices) {
-        keys.push_back(static_cast<uint32_t>(input[idx][order_idx]));
-        values.push_back(static_cast<uint32_t>(input[idx][value_idx]));
-    }
+    // --- Probe-side column indexes ---
+    const size_t begin_idx = probe_schema.index_of(spec.join_spec.begin_column);
+    const size_t end_idx   = probe_schema.index_of(spec.join_spec.end_column);
+
+    // --- Single-morsel probe using the *same* routine as parallel path ---
+    auto local_out = process_probe_morsel_new(
+        0, pr_indices.size(), pr_indices, probe, local_join, begin_idx, end_idx);
+
+    // --- Append (no mutex needed; single-thread) ---
+    std::move(local_out.begin(), local_out.end(), std::back_inserter(result));
+}
+
+
+void BinaryWindowFunctionOperator::process_partition_new(
+    PartitionUtils::IndexDataset in_indices,
+    PartitionUtils::IndexDataset pr_indices,
+    const Dataset &input,
+    const Dataset &probe,
+    const FileSchema &input_schema,
+    const FileSchema &probe_schema,
+    Dataset &result,
+    std::mutex &result_mtx,
+    ThreadPool &pool,
+    size_t morsel_size
+) const {
+    // Skip empty partitions ( this might change if we change partitioning scheme )
+    if (pr_indices.empty() || in_indices.empty()) return;
+
+    // Stage 1: Sort input partition by order column using sort_utils.cpp ips2ra_sort
+    const size_t order_idx = input_schema.index_of(spec.order_column);
+    SortUtils::sort_dataset_indices(input, in_indices, order_idx);
+
+    // auto start_building_index = std::chrono::high_resolution_clock::now();
+    // 2. Build Index
+    const size_t value_idx = input_schema.index_of(spec.value_column);
 
     JoinUtils local_join(spec.join_spec, spec.order_column);
-    local_join.build_index_from_vectors_prefix_sums(keys, values);
+    local_join.build_prefix_sums_from_sorted_indices(input, input_schema,
+                                                     in_indices, order_idx, value_idx);
+    // local_join.build_index_from_vectors_segtree(keys, values);
+    // local_join.build_index_from_vectors_sqrttree(keys, values);
+    // local_join.build_eytzinger();
 
-    // Always inline → call the interleaving probe variant
-    auto local_out = process_probe_morsel_sort_probe_interleaving(
-        0, pr_indices.size(), pr_indices, probe, probe_schema, keys, local_join);
+    // auto end_building_index = std::chrono::high_resolution_clock::now();
+    // auto duration_building_index = std::chrono::duration_cast<std::chrono::microseconds>(
+    //     end_building_index - start_building_index);
+    // std::cout << "Time taken for BUILDING INDEX: " << duration_building_index.count() << " ms" << std::endl;
 
-    // Append to result (mutex not really necessary here if only 1 thread)
+    // --------------------------- PROCESSING THE PROBE ------------------------------
+    // auto start_probe_sorting = std::chrono::high_resolution_clock::now();
+
+    // 2. Sort once by start
+    const size_t begin_col_idx = probe_schema.index_of(spec.join_spec.begin_column);
+    const size_t end_col_idx = probe_schema.index_of(spec.join_spec.end_column);
+    // SortUtils::sort_dataset_indices(probe, pr_indices, begin_col_idx);
+
+    // auto end_probe_sorting = std::chrono::high_resolution_clock::now();
+    // auto duration_probe_sorting = std::chrono::duration_cast<std::chrono::microseconds>(
+    //     end_probe_sorting - start_probe_sorting);
+    // std::cout << "Time taken for PROBE SORTING: " << duration_probe_sorting.count() << " ms" << std::endl;
+
+
+    // auto start_partition_processing = std::chrono::high_resolution_clock::now();
+
+    // 3. Dispatch into morsels
+    if (pr_indices.size() >= morsel_size * 2) {
+        // TODO: Tune threshold
+        process_probe_partition_parallel_new(pr_indices, probe, local_join, result, result_mtx, pool, morsel_size, begin_col_idx, end_col_idx);
+    } else {
+        process_probe_partition_inline_new(pr_indices, probe, local_join, result, result_mtx, begin_col_idx, end_col_idx);
+    }
+
+    // auto end_partition_processing = std::chrono::high_resolution_clock::now();
+    // auto duration_partition_processing = std::chrono::duration_cast<std::chrono::microseconds>(
+    //     end_partition_processing - start_partition_processing);
+    // std::cout << "Time taken for PARTITION PROCESSING: " << duration_partition_processing.count() << " ms" << std::endl;
+}
+
+void BinaryWindowFunctionOperator::process_probe_partition_parallel_new(
+    const PartitionUtils::IndexDataset &pr_indices,
+    const Dataset &probe,
+    const JoinUtils &local_join,
+    Dataset &result,
+    std::mutex &result_mtx,
+    ThreadPool &pool,
+    size_t morsel_size,
+    size_t begin_idx,
+    size_t end_idx
+) const {
+
+    std::vector<std::future<std::vector<DataRow> > > futs; // each future returns a vector of DataRow
+    futs.reserve((pr_indices.size() + morsel_size - 1) / morsel_size); // round up to determine number of morsels
+
+    for (size_t mstart = 0; mstart < pr_indices.size(); mstart += morsel_size) {
+        // for each morsel
+        size_t mend = std::min(mstart + morsel_size, pr_indices.size());
+
+        futs.emplace_back(pool.submit(
+            [this, mstart, mend, &pr_indices, &probe, &local_join, begin_idx, end_idx]() mutable {
+                return process_probe_morsel_new(mstart, mend, pr_indices, probe, local_join, begin_idx, end_idx);
+            }));
+    }
+
+    for (auto &f: futs) {
+        auto part_res = f.get();
+        if (!part_res.empty()) {
+            // if there are results to append
+            std::lock_guard<std::mutex> lk(result_mtx); // protect result appends because result is shared
+            std::move(part_res.begin(), part_res.end(), std::back_inserter(result));
+        }
+    }
+}
+
+void BinaryWindowFunctionOperator::process_probe_partition_inline_new(
+    const PartitionUtils::IndexDataset &pr_indices,
+    const Dataset &probe,
+    const JoinUtils &local_join,
+    Dataset &result,
+    std::mutex &result_mtx,
+    size_t begin_idx,
+    size_t end_idx
+) const {
+    auto local_out = process_probe_morsel_new(0, pr_indices.size(),
+                                              pr_indices, probe, local_join, begin_idx, end_idx);
     std::lock_guard<std::mutex> lk(result_mtx);
     std::move(local_out.begin(), local_out.end(), std::back_inserter(result));
+}
+
+
+std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel_new(
+    size_t mstart,
+    size_t mend,
+    const PartitionUtils::IndexDataset &pr_indices,
+    const Dataset &probe,
+    const JoinUtils &local_join,
+    size_t begin_idx,
+    size_t end_idx
+) const {
+    const size_t cnt = mend - mstart;
+    if (cnt == 0) return {};
+
+    // 1) Gather SoA
+    std::vector<int32_t> q_starts; q_starts.reserve(cnt);
+    std::vector<int32_t> q_ends;   q_ends.reserve(cnt);
+    std::vector<size_t>  probe_ids; probe_ids.reserve(cnt);
+
+    for (size_t j = mstart; j < mend; ++j) {
+        const size_t pid = pr_indices[j];
+        const DataRow &row = probe[pid];
+        q_starts.push_back(static_cast<int32_t>(row[begin_idx]));
+        q_ends.push_back(static_cast<int32_t>(row[end_idx]));
+        probe_ids.push_back(pid);
+    }
+
+    // 2) lo with monotone forward scan (begin is nondecreasing across the morsel)
+    // std::vector<size_t> lo(cnt);
+    // size_t hint_lo = 0;
+    // for (size_t i = 0; i < cnt; ++i) {
+    //     hint_lo = local_join.lower_from_hint(hint_lo, q_starts[i]);
+    //     lo[i] = hint_lo;
+    // }
+    std::vector<size_t> lo = local_join.batched_lower_bound_i32_interleaved(q_starts);
+
+//     // 3) Sort positions by end inside this morsel
+//     std::vector<size_t> by_end(cnt);
+//     std::iota(by_end.begin(), by_end.end(), 0);
+// #ifdef NDEBUG
+//     ips2ra::sort(by_end.begin(), by_end.end(),
+//                  [&](size_t i){ return static_cast<uint32_t>(q_ends[i]) ^ 0x80000000u; });
+// #else
+//     std::sort(by_end.begin(), by_end.end(),
+//               [&](size_t a, size_t b){ return q_ends[a] < q_ends[b]; });
+// #endif
+//
+//     // 4) hi with a *seeded first* + forward hints afterwards
+//     std::vector<size_t> hi(cnt);
+//
+//     // seed from the first (smallest end) item in this morsel:
+//     {
+//         const size_t i0 = by_end[0];
+//         const size_t start0 = lo[i0];                                  // never before lo
+//         // single binary search on [start0, n) to seed hi accurately:
+//         const size_t n = local_join.keys_size();                        // add a const accessor returning keys.size()
+//         size_t seeded = local_join.bounded_upper_bound_i32(start0, n, q_ends[i0]);
+//         hi[i0] = seeded;
+//
+//         // now walk forward for the rest
+//         size_t hint_hi = seeded;
+//         for (size_t k = 1; k < cnt; ++k) {
+//             const size_t i = by_end[k];
+//             const size_t start = (hint_hi < lo[i]) ? lo[i] : hint_hi;   // never go before lo
+//             hint_hi = local_join.upper_from_hint(start, q_ends[i]);     // forward gallop + bounded refine
+//             hi[i] = hint_hi;
+//         }
+//     }
+
+    // hi via interleaved batched upper_bound seeded with lo
+    std::vector<size_t> hi = local_join.batched_upper_bound_i32_interleaved_from_lo(q_ends, lo);
+
+    // 5) Emit (no need to restore original order)
+    std::vector<DataRow> out;
+    out.reserve(cnt);
+    for (size_t i = 0; i < cnt; ++i) {
+        if (lo[i] >= hi[i]) continue;
+        const int64_t sum = local_join.prefix_sums_query(lo[i], hi[i]);
+        DataRow r = probe[probe_ids[i]];
+        r.push_back(sum);
+        out.emplace_back(std::move(r));
+    }
+    return out;
 }

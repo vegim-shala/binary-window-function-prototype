@@ -15,8 +15,8 @@ int main() {
 
     auto start_reading = std::chrono::high_resolution_clock::now();
 
-    auto [input, input_schema] = read_csv_fast_parallel("Z1/input1.csv", num_threads);
-    auto [probe, probe_schema] = read_csv_fast_parallel("Z1/probe1.csv", num_threads);
+    auto [input, input_schema] = read_csv_fast_parallel("Z3/input1.csv", num_threads);
+    auto [probe, probe_schema] = read_csv_fast_parallel("Z3/probe1.csv", num_threads);
     // verify_binary_file("dynamic_columns.bin");
     // auto [data, schema] = read_binary("sensor.bin");
 

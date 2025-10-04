@@ -29,80 +29,34 @@ public:
         : join_spec(join_spec), order_column(order_column) {
     }
 
-    struct RangeKey {
-        uint32_t lo;
-        uint32_t hi;
-    };
-
-    struct RangeCache {
-        static constexpr size_t CAPACITY = 4096; // power of 2
-        struct Entry {
-            uint32_t lo = 0, hi = 0;
-            uint64_t sum = 0;
-            bool valid = false;
-        };
-
-        std::array<Entry, CAPACITY> table;
-
-        mutable size_t hits = 0;
-        mutable size_t misses = 0;
-        bool disabled = false;
-
-        inline size_t hash(uint32_t lo, uint32_t hi) const noexcept {
-            uint64_t k = (static_cast<uint64_t>(lo) << 32) ^ hi;
-            return (k * 11400714819323198485ull) & (CAPACITY - 1);
-        }
-
-        inline bool lookup(uint32_t lo, uint32_t hi, uint64_t &out) const noexcept {
-            if (disabled) return false;
-            size_t h = hash(lo, hi);
-            const Entry &e = table[h];
-            if (e.valid && e.lo == lo && e.hi == hi) {
-                ++hits;
-                out = e.sum;
-                return true;
-            }
-            ++misses;
-            return false;
-        }
-
-        inline void insert(uint32_t lo, uint32_t hi, uint64_t sum) noexcept {
-            if (disabled) return;
-            size_t h = hash(lo, hi);
-            table[h] = {lo, hi, sum, true};
-
-            // adapt every 8k lookups
-            if ((hits + misses) >= 8192) {
-                double rate = double(hits) / double(hits + misses);
-                if (rate < 0.01) {
-                    disabled = true; // turn off caching
-                }
-            }
-        }
-    };
-
     void build_index(const Dataset &input, const FileSchema &schema, std::string &value_column);
 
-    void build_index_from_vectors_segtree(const std::vector<uint32_t> &sorted_keys,
-                                          const std::vector<uint32_t> &values);
+    void build_index_from_vectors_segtree(const std::vector<int32_t> &sorted_keys,
+                                          const std::vector<int32_t> &values);
 
-    // void build_index_from_vectors_segtree_parallel(const std::vector<uint32_t>& sorted_keys, const std::vector<uint32_t>& values,
+    // void build_index_from_vectors_segtree_parallel(const std::vector<int32_t>& sorted_keys, const std::vector<int32_t>& values,
     //                                                           ThreadPool& pool);
 
-    void build_index_from_vectors_prefix_sums(const std::vector<uint32_t> &sorted_keys,
-                                              const std::vector<uint32_t> &values);
+    void build_index_from_vectors_prefix_sums(const std::vector<int32_t> &sorted_keys,
+                                              const std::vector<int32_t> &values);
 
-    void build_index_from_vectors_sqrt_tree(const std::vector<uint32_t> &sorted_keys,
-                                            const std::vector<uint32_t> &values);
+    void build_prefix_sums_from_sorted_indices(const Dataset& input,
+                                      const FileSchema& schema,
+                                      const std::vector<size_t>& sorted_indices,
+                                      size_t order_idx,
+                                      size_t value_idx);
 
-    void build_index_from_vectors_two_pointer_sweep(const std::vector<uint32_t> &sorted_keys,
-                                                    const std::vector<uint32_t> &values);
+    void build_index_from_vectors_sqrt_tree(const std::vector<int32_t> &sorted_keys,
+                                            const std::vector<int32_t> &values);
+
+    void build_index_from_vectors_two_pointer_sweep(const std::vector<int32_t> &sorted_keys,
+                                                    const std::vector<int32_t> &values);
 
     void build_eytzinger();
 
 
-    inline uint64_t seg_query(size_t l, size_t r) const {
-        uint64_t res = 0;
+    inline int64_t seg_query(size_t l, size_t r) const {
+        int64_t res = 0;
         for (l += n, r += n; l < r; l >>= 1, r >>= 1) {
             // we start from leaves and go up, l>>=1 means moving to the parent
             if (l & 1) res += segtree[l++];
@@ -112,12 +66,12 @@ public:
         return res;
     }
 
-    inline uint64_t prefix_sums_query(size_t l, size_t r) const {
+    inline int64_t prefix_sums_query(size_t l, size_t r) const {
         return prefix[r] - prefix[l]; // O(1)
     }
 
     // Branchless lower_bound: first index >= x
-    inline size_t branchless_lower_bound(const std::vector<uint32_t> &arr, uint32_t x) {
+    inline size_t branchless_lower_bound(const std::vector<int32_t> &arr, int32_t x) const {
         size_t n = arr.size();
         size_t pos = 0;
         size_t step = 1ull << (63 - __builtin_clzll(n)); // largest power of 2 <= n
@@ -133,7 +87,7 @@ public:
     }
 
     // Branchless upper_bound: first index > x
-    inline size_t branchless_upper_bound(const std::vector<uint32_t> &arr, uint32_t x) {
+    inline size_t branchless_upper_bound(const std::vector<int32_t> &arr, int32_t x) const {
         size_t n = arr.size();
         size_t pos = 0;
         size_t step = 1ull << (63 - __builtin_clzll(n)); // largest power of 2 <= n
@@ -149,7 +103,7 @@ public:
     }
 
 
-    inline size_t eyt_lower(uint32_t x) const {
+    inline size_t eyt_lower(int32_t x) const {
         size_t n = keys.size();
         size_t k = 1; // root
         size_t res = n; // default = not found
@@ -166,7 +120,7 @@ public:
         return res;
     }
 
-    inline size_t eyt_upper(uint32_t x) const {
+    inline size_t eyt_upper(int32_t x) const {
         size_t n = keys.size();
         size_t k = 1; // root
         size_t res = n; // default = not found
@@ -184,7 +138,7 @@ public:
     }
 
     // Returns first index i in [L, R) with a[i] >= x
-    inline size_t bounded_lower_bound(size_t L, size_t R, uint32_t x) const {
+    inline size_t bounded_lower_bound(size_t L, size_t R, int32_t x) const {
         if (L >= R) return L;
         size_t n = R - L;
         size_t pos = 0;
@@ -204,7 +158,7 @@ public:
     }
 
     // Returns first index i in [L, R) with a[i] > x
-    inline size_t bounded_upper_bound(size_t L, size_t R, uint32_t x) const {
+    inline size_t bounded_upper_bound(size_t L, size_t R, int32_t x) const {
         if (L >= R) return L;
         size_t n = R - L;
         size_t pos = 0;
@@ -223,7 +177,7 @@ public:
     }
 
     // Forward gallop to lower_bound starting from `pos`, then bounded refine.
-    inline size_t eyt_gallop_lower(size_t start, uint32_t x) const {
+    inline size_t eyt_gallop_lower(size_t start, int32_t x) const {
         size_t n = keys.size();
         if (start >= n || keys[start] >= x) return start;
 
@@ -239,7 +193,7 @@ public:
     }
 
     // Forward gallop to upper_bound starting from `pos`, then bounded refine.
-    inline size_t eyt_gallop_upper(size_t start, uint32_t x) const {
+    inline size_t eyt_gallop_upper(size_t start, int32_t x) const {
         size_t n = keys.size();
         if (start >= n || keys[start] > x) return start;
 
@@ -255,7 +209,7 @@ public:
     }
 
     inline std::pair<size_t, size_t>
-    safe_bounds(size_t start, size_t end) {
+    safe_bounds(size_t start, size_t end) const {
         auto lo_it = std::lower_bound(keys.begin(), keys.end(), start);
         auto hi_it = std::upper_bound(keys.begin(), keys.end(), end);
 
@@ -271,8 +225,8 @@ public:
 
     // Minimal batched lower_bound
     inline std::vector<size_t> batched_lower_bound(
-        const std::vector<uint32_t> &queries
-    ) {
+        const std::vector<int32_t> &queries
+    ) const {
         size_t n = keys.size();
         size_t q = queries.size();
 
@@ -299,8 +253,8 @@ public:
 
     // Minimal batched upper_bound
     inline std::vector<size_t> batched_upper_bound(
-        const std::vector<uint32_t> &queries
-    ) {
+        const std::vector<int32_t> &queries
+    ) const {
         size_t n = keys.size();
         size_t q = queries.size();
 
@@ -326,8 +280,8 @@ public:
     }
 
     inline std::vector<size_t> batched_lower_bound_bitwise(
-        const std::vector<uint32_t> &queries
-    ) {
+        const std::vector<int32_t> &queries
+    ) const {
         size_t n = keys.size();
         size_t q = queries.size();
 
@@ -358,8 +312,8 @@ public:
     }
 
     inline std::vector<size_t> batched_upper_bound_bitwise(
-        const std::vector<uint32_t> &queries
-    ) {
+        const std::vector<int32_t> &queries
+    ) const {
         size_t n = keys.size();
         size_t q = queries.size();
 
@@ -387,13 +341,142 @@ public:
         return pos;
     }
 
+    inline size_t lower_from_hint(size_t start, int32_t x) const {
+        const size_t n = keys.size();
+        if (start >= n || keys[start] >= x) return start;
+        size_t cur = start, step = 1;
+        while (cur + step < n && keys[cur + step] < x) {
+            PREFETCH(&keys[cur + (step<<1)]);
+            cur += step; step <<= 1;
+        }
+        // bounded lower_bound in (cur, cur+step]
+        size_t L = cur + 1, R = std::min(n, cur + step + 1), len = R - L, pos = 0;
+#if defined(__GNUC__) || defined(__clang__)
+        size_t s = 1ull << (63 - __builtin_clzll(len ? len : 1));
+#else
+        size_t s = 1; while ((s<<1) <= len) s <<= 1;
+#endif
+        while (s) { size_t nxt = pos + s; if (nxt <= len && keys[L + nxt - 1] < x) pos = nxt; s >>= 1; }
+        return L + pos;
+    }
+
+    inline size_t upper_from_hint(size_t start, int32_t x) const {
+        const size_t n = keys.size();
+        if (start >= n || keys[start] > x) return start;
+        size_t cur = start, step = 1;
+        while (cur + step < n && keys[cur + step] <= x) {
+            PREFETCH(&keys[cur + (step<<1)]);
+            cur += step; step <<= 1;
+        }
+        size_t L = cur + 1, R = std::min(n, cur + step + 1), len = R - L, pos = 0;
+#if defined(__GNUC__) || defined(__clang__)
+        size_t s = 1ull << (63 - __builtin_clzll(len ? len : 1));
+#else
+        size_t s = 1; while ((s<<1) <= len) s <<= 1;
+#endif
+        while (s) { size_t nxt = pos + s; if (nxt <= len && keys[L + nxt - 1] <= x) pos = nxt; s >>= 1; }
+        return L + pos;
+    }
+
+    // Bounded upper_bound on [L, R): first i with keys[i] > x, with L <= i <= R
+    inline size_t bounded_upper_bound_i32(size_t L, size_t R, int32_t x) const {
+        if (L >= R) return L;
+        size_t n = R - L, pos = 0;
+#if defined(__GNUC__) || defined(__clang__)
+        size_t s = 1ull << (63 - __builtin_clzll(n ? n : 1));
+#else
+        size_t s = 1; while ((s<<1) <= n) s <<= 1;
+#endif
+        while (s) { size_t nxt = pos + s; if (nxt <= n && keys[L + nxt - 1] <= x) pos = nxt; s >>= 1; }
+        return L + pos;
+    }
+
+
+    size_t keys_size() const { return keys.size(); }
+
+    inline // Interleaved batched upper_bound on [lo[i], n) for each query q[i] (int32_t).
+// Returns hi[i] = first index j >= lo[i] with keys[j] > q[i] (or n if none).
+std::vector<size_t> batched_upper_bound_i32_interleaved_from_lo(
+    const std::vector<int32_t>& q,
+    const std::vector<size_t>& lo
+) const {
+        const size_t n = keys.size();
+        const size_t m = q.size();
+        std::vector<size_t> pos(m);
+
+        if (m == 0 || n == 0) return pos; // all zeros
+
+        // Initialize each search to "last position <= q[i]" but never before lo[i].
+        // Trick: start at lo[i] - 1 (clamped at 0), then the bitwise walk only moves forward.
+        for (size_t i = 0; i < m; ++i) {
+            pos[i] = (lo[i] == 0) ? 0 : (lo[i] - 1);
+        }
+
+        // Global step: largest power of two <= n
+#if defined(__GNUC__) || defined(__clang__)
+        size_t step = 1ull << (63 - __builtin_clzll(n));
+#else
+        size_t step = 1; while ((step << 1) <= n) step <<= 1;
+#endif
+
+        while (step > 0) {
+            for (size_t i = 0; i < m; ++i) {
+                const size_t next = pos[i] + step;
+                // Stay inside array; classic upper_bound <= comparison
+                if (next < n && keys[next] <= q[i]) {
+                    pos[i] = next;
+                }
+            }
+            step >>= 1;
+        }
+
+        // Convert "last <= q[i]" into "first > q[i]"
+        for (size_t i = 0; i < m; ++i) {
+            if (pos[i] < n && keys[pos[i]] <= q[i]) {
+                ++pos[i];
+            }
+        }
+        return pos; // this is hi[]
+    }
+
+    // Interleaved batched LOWER bound: first index >= q[i]
+    inline std::vector<size_t> batched_lower_bound_i32_interleaved(
+        const std::vector<int32_t>& q
+    ) const {
+        const size_t n = keys.size(), m = q.size();
+        std::vector<size_t> pos(m, 0);
+
+        if (m == 0 || n == 0) return pos;
+
+#if defined(__GNUC__) || defined(__clang__)
+        size_t step = 1ull << (63 - __builtin_clzll(n));
+#else
+        size_t step = 1; while ((step << 1) <= n) step <<= 1;
+#endif
+
+        // Find greatest index with keys[pos] < q[i]
+        while (step > 0) {
+            for (size_t i = 0; i < m; ++i) {
+                const size_t next = pos[i] + step;
+                if (next < n && keys[next] < q[i]) pos[i] = next;
+            }
+            step >>= 1;
+        }
+
+        // Convert to first index >= q[i]
+        for (size_t i = 0; i < m; ++i) {
+            if (pos[i] < n && keys[pos[i]] < q[i]) ++pos[i];
+        }
+        return pos;
+    }
+
     // --- For bucketed search ---
     size_t bucket_size = 1024; // tuneable
-    std::vector<uint32_t> block_mins; // first key of each block
+    std::vector<int32_t> block_mins; // first key of each block
 
     void build_buckets();
 
-    inline size_t bucket_lower(uint32_t x) const {
+    inline size_t bucket_lower(int32_t x) const {
         if (keys.empty()) return 0;
 
         // Step 1: find candidate block
@@ -408,7 +491,7 @@ public:
         return inner - keys.begin();
     }
 
-    inline size_t bucket_upper(uint32_t x) const {
+    inline size_t bucket_upper(int32_t x) const {
         if (keys.empty()) return 0;
 
         auto it = std::upper_bound(block_mins.begin(), block_mins.end(), x);
@@ -426,28 +509,28 @@ public:
     // For SQRT Tree
     size_t block_size = 0;
     size_t num_blocks = 0;
-    std::vector<uint32_t> values;
-    std::vector<uint64_t> block_sum; // total sum per block
-    std::vector<uint64_t> sqrt_prefix; // prefix sum inside each block
-    std::vector<uint64_t> sqrt_suffix; // suffix sum inside each block
-    void build_index_from_vectors_sqrttree(const std::vector<uint32_t> &sorted_keys,
-                                           const std::vector<uint32_t> &vals);
+    std::vector<int32_t> values;
+    std::vector<int64_t> block_sum; // total sum per block
+    std::vector<int64_t> sqrt_prefix; // prefix sum inside each block
+    std::vector<int64_t> sqrt_suffix; // suffix sum inside each block
+    void build_index_from_vectors_sqrttree(const std::vector<int32_t> &sorted_keys,
+                                           const std::vector<int32_t> &vals) ;
 
-    inline uint64_t sqrt_query(size_t l, size_t r) const {
+    inline int64_t sqrt_query(size_t l, size_t r) const {
         if (l >= r) return 0;
         size_t bl = l / block_size;
         size_t br = (r - 1) / block_size;
 
         if (bl == br) {
             // within one block → sum directly
-            uint64_t s = 0;
+            int64_t s = 0;
             for (size_t i = l; i < r; i++) {
                 s += values[i];
             }
             return s;
         }
 
-        uint64_t res = sqrt_suffix[l]; // remainder of left block
+        int64_t res = sqrt_suffix[l]; // remainder of left block
         for (size_t b = bl + 1; b < br; ++b) {
             res += block_sum[b]; // full blocks
         }
@@ -461,15 +544,15 @@ private:
 
     // For Segment Tree
     size_t n = 0;
-    std::vector<uint32_t> keys; // sorted probe/build keys
-    std::vector<uint64_t> segtree; // 1..(2n-1) used (0 unused)
+    std::vector<int32_t> keys; // sorted probe/build keys
+    std::vector<int64_t> segtree; // 1..(2n-1) used (0 unused)
 
     // For Prefix Sums
-    std::vector<uint32_t> prefix;
+    std::vector<int64_t> prefix;
 
 
     // Eytzinger
-    // std::vector<uint32_t> eyt_keys;
-    std::vector<uint32_t> eyt;
+    // std::vector<int32_t> eyt_keys;
+    std::vector<int32_t> eyt;
     std::vector<size_t> pos_to_orig;
 };

@@ -172,13 +172,13 @@ void ips4o_parallel_sort(Dataset &data, const FileSchema &schema, const size_t &
 
 void SortUtils::sort_dataset(Dataset &data, const FileSchema &schema, const size_t &order_idx,
                              size_t parallel_threads) {
-    auto start = std::chrono::high_resolution_clock::now();
+    // auto start = std::chrono::high_resolution_clock::now();
 
     ips2ra_parallel_sort(data, schema, order_idx, parallel_threads);
 
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
+    // auto end = std::chrono::high_resolution_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    // std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
 }
 
 

@@ -294,41 +294,119 @@ void parallel_sort(std::vector<T> &data, ThreadPool &pool) {
     }
 }
 
-int main() {
-    ThreadPool pool(std::thread::hardware_concurrency());
+// int main() {
+//     ThreadPool pool(std::thread::hardware_concurrency());
+//
+//     for (size_t N : {100'000, 200000, 500000, 1000000, 2000000, 4000000,5000000,6000000,7000000,7500000,8000000,9000000,
+//          10000000,20000000,30000000,40000000,50000000,60000000,80000000,100000000, 200000000, 300000000, 400000000, 500000000, 1000000000}) {
+//         std::vector<int> data(N);
+//         std::mt19937 rng(42);
+//         std::uniform_int_distribution<int> dist(0, 1000000);
+//         for (auto &x : data) x = dist(rng);
+//
+//         auto start = std::chrono::high_resolution_clock::now();
+//         parallel_sort(data, pool);
+//         auto end = std::chrono::high_resolution_clock::now();
+//
+//         double ms = std::chrono::duration<double, std::milli>(end - start).count();
+//         std::cout << "N=" << N << " time=" << ms << " ms\n";
+//     }
+// }
 
-    for (size_t N : {100'000, 200000, 500000, 1000000, 2000000, 4000000,5000000,6000000,7000000,7500000,8000000,9000000,
-         10000000,20000000,30000000,40000000,50000000,60000000,80000000,100000000, 200000000, 300000000, 400000000, 500000000, 1000000000}) {
-        std::vector<int> data(N);
-        std::mt19937 rng(42);
-        std::uniform_int_distribution<int> dist(0, 1000000);
-        for (auto &x : data) x = dist(rng);
 
-        auto start = std::chrono::high_resolution_clock::now();
-        parallel_sort(data, pool);
-        auto end = std::chrono::high_resolution_clock::now();
+// Radix sort 32-bit keys with optional index permutation.
+// Sorts ascending by SIGNED order if you pass normalize_signed=true.
+// Stable. O(4N) passes. Requires temp buffers of same size as input.
+// Stable LSD radix sort for 32-bit keys with optional side permutation.
+// - O(4N) passes (8-bit digits)
+// - Signed order supported without pre-normalizing: only the MSB pass is biased.
+// - Leaves sorted data in `keys` (no extra final memcpy).
+void radix_sort_u32_with_perm_inplace(
+    std::vector<uint32_t>& keys,
+    std::vector<size_t>*   perm = nullptr,   // optional parallel permutation (row ids)
+    bool signed_order = false                // true if you want int32 ascending order
+) {
+    const size_t n = keys.size();
+    if (!n) return;
 
-        double ms = std::chrono::duration<double, std::milli>(end - start).count();
-        std::cout << "N=" << N << " time=" << ms << " ms\n";
+    std::vector<uint32_t> buf(n);
+    std::vector<size_t>   pbuf;
+    if (perm) {
+        if (perm->empty()) { perm->resize(n); std::iota(perm->begin(), perm->end(), 0); }
+        pbuf.resize(n);
+    }
+
+    std::array<size_t,256> cnt;
+
+    uint32_t* src_k = keys.data();
+    uint32_t* dst_k = buf.data();
+    size_t*   src_p = perm ? perm->data() : nullptr;
+    size_t*   dst_p = perm ? pbuf.data()  : nullptr;
+
+    for (int pass = 0; pass < 4; ++pass) {
+        cnt.fill(0);
+        const int shift = pass * 8;
+
+        // 1) histogram (bias MSB bucket for signed order)
+        if (signed_order && pass == 3) {
+            for (size_t i = 0; i < n; ++i)
+                ++cnt[((src_k[i] >> shift) & 0xFFu) ^ 0x80u];
+        } else {
+            for (size_t i = 0; i < n; ++i)
+                ++cnt[(src_k[i] >> shift) & 0xFFu];
+        }
+
+        // 2) exclusive prefix
+        size_t sum = 0;
+        for (size_t b = 0; b < 256; ++b) { size_t c = cnt[b]; cnt[b] = sum; sum += c; }
+
+        // 3) stable scatter
+        if (signed_order && pass == 3) {
+            for (size_t i = 0; i < n; ++i) {
+                const uint32_t kv = src_k[i];
+                const uint8_t  b  = ((kv >> shift) & 0xFFu) ^ 0x80u;
+                size_t pos = cnt[b]++;
+                dst_k[pos] = kv;
+                if (src_p) dst_p[pos] = src_p[i];
+            }
+        } else {
+            for (size_t i = 0; i < n; ++i) {
+                const uint32_t kv = src_k[i];
+                const uint8_t  b  = (kv >> shift) & 0xFFu;
+                size_t pos = cnt[b]++;
+                dst_k[pos] = kv;
+                if (src_p) dst_p[pos] = src_p[i];
+            }
+        }
+
+        // 4) ping-pong
+        std::swap(src_k, dst_k);
+        if (src_p) std::swap(src_p, dst_p);
+    }
+
+    // After 4 passes, sorted data live in src_k/src_p. Ensure keys/perm hold them.
+    if (src_k != keys.data()) {
+        std::memcpy(keys.data(), src_k, n * sizeof(uint32_t));
+        if (src_p) std::memcpy(perm->data(), src_p, n * sizeof(size_t));
     }
 }
 
-// int main() {
-//     std::mt19937 rng(123);
-//     for (size_t N : {100'000, 200000, 500000, 1000000, 2000000, 4000000,5000000,6000000,7000000,7500000,8000000,9000000,
-//         10000000,20000000,30000000,40000000,50000000,60000000,80000000,100000000, 200000000, 300000000, 400000000, 500000000, 1000000000}) {
-//         vector<int> data(N);
-//         iota(data.begin(), data.end(), 0);
-//         shuffle(data.begin(), data.end(), mt19937{123});
-//
-//         auto start = chrono::high_resolution_clock::now();
-//         sort(data.begin(), data.end());  // O(N log N)
-//         auto end = chrono::high_resolution_clock::now();
-//
-//         auto ms = chrono::duration_cast<chrono::microseconds>(end - start).count();
-//         cout << "N=" << N << " time=" << ms << " T/N=" << double(ms)/N << "\n";
-//     }
-// }
+int main() {
+    std::mt19937 rng(123);
+    for (size_t N : {100'000, 200000, 500000, 1000000, 2000000, 4000000,5000000,6000000,7000000,7500000,8000000,9000000,
+        10000000,20000000,30000000,40000000,50000000,60000000,80000000,100000000, 200000000, 300000000, 400000000, 500000000, 1000000000}) {
+        vector<uint32_t> data(N);
+        iota(data.begin(), data.end(), 0);
+        shuffle(data.begin(), data.end(), mt19937{123});
+
+        auto start = chrono::high_resolution_clock::now();
+        radix_sort_u32_with_perm_inplace(data, /*perm*/nullptr, /*normalize_signed=*/false);
+        auto end = chrono::high_resolution_clock::now();
+
+        auto ms = chrono::duration_cast<chrono::microseconds>(end - start).count();
+        cout << "Time taken for SORTING: " << ms << " ms" << "\n\n\n";
+    }
+}
 
 // int main() {
 //     std::string folder_name = "Z1";

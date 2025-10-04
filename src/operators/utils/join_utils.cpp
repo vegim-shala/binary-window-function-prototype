@@ -11,8 +11,8 @@
 
 
 void JoinUtils::build_index_from_vectors_segtree(
-    const std::vector<uint32_t> &sorted_keys,
-    const std::vector<uint32_t> &values
+    const std::vector<int32_t> &sorted_keys,
+    const std::vector<int32_t> &values
 ) {
     n = sorted_keys.size();
     keys = sorted_keys;
@@ -21,7 +21,7 @@ void JoinUtils::build_index_from_vectors_segtree(
 
     // leaves
     for (size_t i = 0; i < n; ++i) {
-        segtree[n + i] = static_cast<uint64_t>(values[i]);
+        segtree[n + i] = static_cast<int64_t>(values[i]);
     }
 
     // parents
@@ -31,8 +31,8 @@ void JoinUtils::build_index_from_vectors_segtree(
 }
 
 void JoinUtils::build_index_from_vectors_prefix_sums(
-    const std::vector<uint32_t> &sorted_keys,
-    const std::vector<uint32_t> &values
+    const std::vector<int32_t> &sorted_keys,
+    const std::vector<int32_t> &values
 ) {
     n = sorted_keys.size();
     keys = sorted_keys;
@@ -40,7 +40,30 @@ void JoinUtils::build_index_from_vectors_prefix_sums(
     prefix.resize(n + 1);
     prefix[0] = 0;
     for (size_t i = 0; i < n; ++i) {
-        prefix[i + 1] = prefix[i] + static_cast<uint64_t>(values[i]);
+        prefix[i + 1] = prefix[i] + values[i];
+    }
+}
+
+void JoinUtils::build_prefix_sums_from_sorted_indices(const Dataset& input,
+                                      const FileSchema& schema,
+                                      const std::vector<size_t>& sorted_indices,
+                                      size_t order_idx,
+                                      size_t value_idx) {
+    const size_t n_local = sorted_indices.size();
+    n = n_local;
+
+    keys.resize(n_local);
+    prefix.resize(n_local + 1);
+    prefix[0] = 0;
+
+    for (size_t i = 0; i < n_local; ++i) {
+        size_t row_id = sorted_indices[i];
+
+        // Read once per row (SoA later would be even better)
+        const DataRow& row = input[row_id];
+
+        keys[i]     = row[order_idx];
+        prefix[i+1] = prefix[i] + row[value_idx];
     }
 }
 
@@ -73,8 +96,8 @@ void JoinUtils::build_buckets() {
 }
 
 void JoinUtils::build_index_from_vectors_sqrttree(
-    const std::vector<uint32_t> &sorted_keys,
-    const std::vector<uint32_t> &vals
+    const std::vector<int32_t> &sorted_keys,
+    const std::vector<int32_t> &vals
 ) {
     keys = sorted_keys;
     values.assign(vals.begin(), vals.end());
@@ -91,14 +114,14 @@ void JoinUtils::build_index_from_vectors_sqrttree(
         size_t start = b * block_size;
         size_t end = std::min(start + block_size, n);
 
-        uint64_t s = 0;
+        int64_t s = 0;
         for (size_t i = start; i < end; i++) {
             s += values[i];
             sqrt_prefix[i] = s;
         }
         block_sum[b] = s;
 
-        uint64_t suf = 0;
+        int64_t suf = 0;
         for (size_t i = end; i-- > start;) {
             suf += values[i];
             sqrt_suffix[i] = suf;
@@ -106,8 +129,8 @@ void JoinUtils::build_index_from_vectors_sqrttree(
     }
 }
 
-void JoinUtils::build_index_from_vectors_sqrt_tree(const std::vector<uint32_t> &sorted_keys,
-                                                   const std::vector<uint32_t> &vals) {
+void JoinUtils::build_index_from_vectors_sqrt_tree(const std::vector<int32_t> &sorted_keys,
+                                                   const std::vector<int32_t> &vals) {
     n = sorted_keys.size();
     keys = sorted_keys;
     values = vals;
