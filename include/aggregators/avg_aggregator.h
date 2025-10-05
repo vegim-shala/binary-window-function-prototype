@@ -4,9 +4,16 @@
 
 #pragma once
 #include "aggregator.h"
-#include <numeric>
+#include "count_aggregator.h"
+#include "sum_aggregator.h"
 
 class AvgAggregator : public Aggregator {
 public:
-    double compute(const std::vector<double>& values) const override;
+    void build_from_values(const std::vector<int32_t> &values) override;
+
+    int64_t query(size_t lo, size_t hi) const override;
+
+private:
+    SumAggregator sum;
+    CountAggregator count;
 };

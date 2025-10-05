@@ -15,10 +15,8 @@
   #define PREFETCH(addr) ((void)0)
 #endif
 
-enum class JoinType { RANGE, ROWS };
 
 struct JoinSpec {
-    JoinType type = JoinType::RANGE;
     std::string begin_column;
     std::string end_column;
 };
@@ -27,6 +25,26 @@ class JoinUtils {
 public:
     explicit JoinUtils(const JoinSpec &join_spec, const std::string &order_column)
         : join_spec(join_spec), order_column(order_column) {
+    }
+
+    inline void build_keys_and_values(
+    const Dataset &input,
+    const FileSchema &schema,
+    const std::vector<size_t> &sorted_indices,
+    size_t order_idx,
+    size_t value_idx,
+    std::vector<int32_t> &out_values
+) {
+        keys.clear();
+        keys.reserve(sorted_indices.size());
+        out_values.clear();
+        out_values.reserve(sorted_indices.size());
+
+        for (size_t pos : sorted_indices) {
+            const auto &row = input[pos];
+            keys.push_back(row[order_idx]);
+            out_values.push_back(row[value_idx]);
+        }
     }
 
     void build_index(const Dataset &input, const FileSchema &schema, std::string &value_column);
@@ -40,11 +58,11 @@ public:
     void build_index_from_vectors_prefix_sums(const std::vector<int32_t> &sorted_keys,
                                               const std::vector<int32_t> &values);
 
-    void build_prefix_sums_from_sorted_indices(const Dataset& input,
-                                      const FileSchema& schema,
-                                      const std::vector<size_t>& sorted_indices,
-                                      size_t order_idx,
-                                      size_t value_idx);
+    void build_prefix_sums_from_sorted_indices(const Dataset &input,
+                                               const FileSchema &schema,
+                                               const std::vector<size_t> &sorted_indices,
+                                               size_t order_idx,
+                                               size_t value_idx);
 
     void build_index_from_vectors_sqrt_tree(const std::vector<int32_t> &sorted_keys,
                                             const std::vector<int32_t> &values);
@@ -347,7 +365,8 @@ public:
         size_t cur = start, step = 1;
         while (cur + step < n && keys[cur + step] < x) {
             PREFETCH(&keys[cur + (step<<1)]);
-            cur += step; step <<= 1;
+            cur += step;
+            step <<= 1;
         }
         // bounded lower_bound in (cur, cur+step]
         size_t L = cur + 1, R = std::min(n, cur + step + 1), len = R - L, pos = 0;
@@ -356,7 +375,11 @@ public:
 #else
         size_t s = 1; while ((s<<1) <= len) s <<= 1;
 #endif
-        while (s) { size_t nxt = pos + s; if (nxt <= len && keys[L + nxt - 1] < x) pos = nxt; s >>= 1; }
+        while (s) {
+            size_t nxt = pos + s;
+            if (nxt <= len && keys[L + nxt - 1] < x) pos = nxt;
+            s >>= 1;
+        }
         return L + pos;
     }
 
@@ -366,7 +389,8 @@ public:
         size_t cur = start, step = 1;
         while (cur + step < n && keys[cur + step] <= x) {
             PREFETCH(&keys[cur + (step<<1)]);
-            cur += step; step <<= 1;
+            cur += step;
+            step <<= 1;
         }
         size_t L = cur + 1, R = std::min(n, cur + step + 1), len = R - L, pos = 0;
 #if defined(__GNUC__) || defined(__clang__)
@@ -374,7 +398,11 @@ public:
 #else
         size_t s = 1; while ((s<<1) <= len) s <<= 1;
 #endif
-        while (s) { size_t nxt = pos + s; if (nxt <= len && keys[L + nxt - 1] <= x) pos = nxt; s >>= 1; }
+        while (s) {
+            size_t nxt = pos + s;
+            if (nxt <= len && keys[L + nxt - 1] <= x) pos = nxt;
+            s >>= 1;
+        }
         return L + pos;
     }
 
@@ -387,7 +415,11 @@ public:
 #else
         size_t s = 1; while ((s<<1) <= n) s <<= 1;
 #endif
-        while (s) { size_t nxt = pos + s; if (nxt <= n && keys[L + nxt - 1] <= x) pos = nxt; s >>= 1; }
+        while (s) {
+            size_t nxt = pos + s;
+            if (nxt <= n && keys[L + nxt - 1] <= x) pos = nxt;
+            s >>= 1;
+        }
         return L + pos;
     }
 
@@ -395,11 +427,11 @@ public:
     size_t keys_size() const { return keys.size(); }
 
     inline // Interleaved batched upper_bound on [lo[i], n) for each query q[i] (int32_t).
-// Returns hi[i] = first index j >= lo[i] with keys[j] > q[i] (or n if none).
-std::vector<size_t> batched_upper_bound_i32_interleaved_from_lo(
-    const std::vector<int32_t>& q,
-    const std::vector<size_t>& lo
-) const {
+    // Returns hi[i] = first index j >= lo[i] with keys[j] > q[i] (or n if none).
+    std::vector<size_t> batched_upper_bound_i32_interleaved_from_lo(
+        const std::vector<int32_t> &q,
+        const std::vector<size_t> &lo
+    ) const {
         const size_t n = keys.size();
         const size_t m = q.size();
         std::vector<size_t> pos(m);
@@ -441,7 +473,7 @@ std::vector<size_t> batched_upper_bound_i32_interleaved_from_lo(
 
     // Interleaved batched LOWER bound: first index >= q[i]
     inline std::vector<size_t> batched_lower_bound_i32_interleaved(
-        const std::vector<int32_t>& q
+        const std::vector<int32_t> &q
     ) const {
         const size_t n = keys.size(), m = q.size();
         std::vector<size_t> pos(m, 0);
@@ -514,7 +546,7 @@ std::vector<size_t> batched_upper_bound_i32_interleaved_from_lo(
     std::vector<int64_t> sqrt_prefix; // prefix sum inside each block
     std::vector<int64_t> sqrt_suffix; // suffix sum inside each block
     void build_index_from_vectors_sqrttree(const std::vector<int32_t> &sorted_keys,
-                                           const std::vector<int32_t> &vals) ;
+                                           const std::vector<int32_t> &vals);
 
     inline int64_t sqrt_query(size_t l, size_t r) const {
         if (l >= r) return 0;

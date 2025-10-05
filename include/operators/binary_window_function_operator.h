@@ -24,7 +24,6 @@ class BinaryWindowFunctionOperator {
 public:
     explicit BinaryWindowFunctionOperator(BinaryWindowFunctionModel spec)
         : spec(std::move(spec)),
-          aggregator(create_aggregator(this->spec.agg_type)),
           join_utils(this->spec.join_spec, this->spec.order_column) {
     }
 
@@ -40,9 +39,7 @@ public:
 
 private:
     BinaryWindowFunctionModel spec;
-    std::unique_ptr<Aggregator> aggregator;
     JoinUtils join_utils;
-    std::vector<uint32_t> global_keys;
 
     std::vector<std::pair<PartitionUtils::IndexDataset, PartitionUtils::IndexDataset> > build_worklist(
         auto &input_idx_partitions,
@@ -161,6 +158,7 @@ private:
         const PartitionUtils::IndexDataset &pr_indices,
         const Dataset &probe,
         const JoinUtils &local_join,
+        const Aggregator &aggregator,
         Dataset &result,
         std::mutex &result_mtx,
         ThreadPool &pool,
@@ -173,6 +171,7 @@ private:
         const PartitionUtils::IndexDataset &pr_indices,
         const Dataset &probe,
         const JoinUtils &local_join,
+        const Aggregator &aggregator,
         Dataset &result,
         std::mutex &result_mtx,
         size_t begin_idx,
@@ -185,6 +184,7 @@ private:
         const PartitionUtils::IndexDataset &pr_indices,
         const Dataset &probe,
         const JoinUtils &local_join,
+        const Aggregator &aggregator,
         size_t begin_idx,
         size_t end_idx
     ) const;

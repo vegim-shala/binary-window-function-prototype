@@ -4,9 +4,13 @@
 
 #pragma once
 #include "aggregator.h"
-#include <numeric>
 
 class CountAggregator : public Aggregator {
 public:
-    double compute(const std::vector<double>& values) const override;
+    void build_from_values(const std::vector<int32_t> &values) override;
+
+    int64_t query(size_t lo, size_t hi) const override;
+
+private:
+    std::vector<size_t> prefix;
 };

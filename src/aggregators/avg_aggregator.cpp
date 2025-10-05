@@ -4,7 +4,12 @@
 #include "aggregators/avg_aggregator.h"
 #include <numeric>
 
-double AvgAggregator::compute(const std::vector<double>& values) const {
-    if (values.empty()) return 0.0;
-    return std::accumulate(values.begin(), values.end(), 0.0) / values.size();
+void AvgAggregator::build_from_values(const std::vector<int32_t> &values) {
+    sum.build_from_values(values);
+    count.build_from_values(values);
+}
+
+int64_t AvgAggregator::query(size_t lo, size_t hi) const {
+    int64_t c = count.query(lo, hi);
+    return (c == 0) ? 0 : sum.query(lo, hi) / c;
 }
