@@ -34,12 +34,12 @@ public:
         // test_A1_very_small_ranges(algo_ind); // D2
         // test_multiple_partitioning_columns(algo_ind); // E1
         // test_huge_single_partition(algo_ind); // E1
-        // test_one_partition_scaling(algo_ind); // Z1
+        test_one_partition_scaling(algo_ind); // Z1
         // test_one_partition_one_range(algo_ind); // Z2
         // test_many_partitions_scaling(algo_ind); // Z3
         // test_one_partition_scaling_one_probe_row(algo_ind); // Z1.1
         // test_probing_scaling(algo_ind); // Z4
-        test_one_partition_scaling_seq(algo_ind); // Z1 seq
+        // test_one_partition_scaling_seq(algo_ind); // Z1 seq
         // test_many_partitions_scaling_seq(algo_ind); // Z3 seq
 
         std::cout << "\n=== Benchmark Complete ===\n";
