@@ -343,16 +343,23 @@ pair<Dataset, FileSchema> BinaryWindowFunctionOperator::execute(
     auto worklist = build_worklist(input_idx_partitions, probe_idx_partitions);
 
     // Stage 4: Process the partitions in parallel using the thread pool
-    size_t batch_size = std::max<size_t>(1, std::min<size_t>(pool_size / 2, worklist.size())); // leave threads for morsels
+    size_t batch_size = std::max<size_t>(1, std::min<size_t>(pool_size / 2, worklist.size()));
+    // leave threads for morsels
+
+    // We use the inline function calculate_median_probe_partition_size to calculate the probe_morsel_size
+    size_t probe_morsel_size = std::min<size_t>(
+        65536, std::exp2(
+            static_cast<size_t>(std::floor(std::log2(calculate_median_probe_partition_size(worklist) / 32)))));
+
     if (worklist.size() == 1) {
         auto [in_inds, pr_inds] = std::move(worklist[0]);
         process_partition_new(std::move(in_inds), std::move(pr_inds),
                               input, probe, input_schema, probe_schema,
-                              result, result_mtx, pool, partition_morsel_size);
+                              result, result_mtx, pool, probe_morsel_size);
         // return
     } else {
         process_worklist(worklist, input, probe, input_schema, probe_schema,
-                         result, result_mtx, pool, batch_size, partition_morsel_size); // current path
+                         result, result_mtx, pool, batch_size, probe_morsel_size); // current path
     }
 
 
@@ -524,10 +531,12 @@ void BinaryWindowFunctionOperator::process_partition_new(
     // 3. Dispatch into morsels
     if (pr_indices.size() >= morsel_size * 2) {
         // TODO: Tune threshold
-        process_probe_partition_parallel_new(pr_indices, probe, local_join, *aggregator, result, result_mtx, pool, morsel_size,
+        process_probe_partition_parallel_new(pr_indices, probe, local_join, *aggregator, result, result_mtx, pool,
+                                             morsel_size,
                                              begin_col_idx, end_col_idx);
     } else {
-        process_probe_partition_inline_new(pr_indices, probe, local_join, *aggregator, result, result_mtx, begin_col_idx,
+        process_probe_partition_inline_new(pr_indices, probe, local_join, *aggregator, result, result_mtx,
+                                           begin_col_idx,
                                            end_col_idx);
     }
 
@@ -549,7 +558,6 @@ void BinaryWindowFunctionOperator::process_probe_partition_parallel_new(
     size_t begin_idx,
     size_t end_idx
 ) const {
-
     std::vector<std::future<std::vector<DataRow> > > futs; // each future returns a vector of DataRow
     futs.reserve((pr_indices.size() + morsel_size - 1) / morsel_size); // round up to determine number of morsels
 
@@ -559,7 +567,8 @@ void BinaryWindowFunctionOperator::process_probe_partition_parallel_new(
 
         futs.emplace_back(pool.submit(
             [this, mstart, mend, &pr_indices, &probe, &local_join, &aggregator, begin_idx, end_idx]() mutable {
-                return process_probe_morsel_new(mstart, mend, pr_indices, probe, local_join, aggregator, begin_idx, end_idx);
+                return process_probe_morsel_new(mstart, mend, pr_indices, probe, local_join, aggregator, begin_idx,
+                                                end_idx);
             }));
     }
 
@@ -572,7 +581,6 @@ void BinaryWindowFunctionOperator::process_probe_partition_parallel_new(
         }
     }
 }
-
 
 
 void BinaryWindowFunctionOperator::process_probe_partition_inline_new(

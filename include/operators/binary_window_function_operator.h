@@ -30,6 +30,22 @@ public:
     std::pair<Dataset, FileSchema> execute(Dataset &input, Dataset &probe, FileSchema input_schema,
                                            FileSchema probe_schema);
 
+    // This is an inline function that calculates the median size of probe partitions
+    inline size_t calculate_median_probe_partition_size(
+        const std::vector<std::pair<PartitionUtils::IndexDataset, PartitionUtils::IndexDataset> > &worklist
+    ) {
+        std::vector<size_t> probe_partition_sizes;
+        probe_partition_sizes.reserve(worklist.size());
+        for (const auto &pair : worklist) {
+            probe_partition_sizes.push_back(pair.second.size());
+        }
+        std::nth_element(probe_partition_sizes.begin(),
+                         probe_partition_sizes.begin() + probe_partition_sizes.size() / 2,
+                         probe_partition_sizes.end());
+        return probe_partition_sizes[probe_partition_sizes.size() / 2];
+    }
+
+
     std::pair<Dataset, FileSchema> execute_sequential(
         Dataset &input,
         Dataset &probe,

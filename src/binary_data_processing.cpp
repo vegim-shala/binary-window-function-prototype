@@ -45,7 +45,7 @@ int main() {
         .end_column = "end_col"
     };
 
-    model.agg_type = AggregationType::AVG;
+    model.agg_type = AggregationType::SUM;
 
     BinaryWindowFunctionOperator op(model);
     // BinaryWindowFunctionOperator2 op(model);

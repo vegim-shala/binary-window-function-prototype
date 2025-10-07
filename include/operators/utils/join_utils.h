@@ -426,9 +426,9 @@ public:
 
     size_t keys_size() const { return keys.size(); }
 
-    inline // Interleaved batched upper_bound on [lo[i], n) for each query q[i] (int32_t).
+     // Interleaved batched upper_bound on [lo[i], n) for each query q[i] (int32_t).
     // Returns hi[i] = first index j >= lo[i] with keys[j] > q[i] (or n if none).
-    std::vector<size_t> batched_upper_bound_i32_interleaved_from_lo(
+    inline std::vector<size_t> batched_upper_bound_i32_interleaved_from_lo(
         const std::vector<int32_t> &q,
         const std::vector<size_t> &lo
     ) const {
