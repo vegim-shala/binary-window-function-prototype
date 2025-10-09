@@ -308,16 +308,16 @@ PartitionUtils::PartitionIndexResult PartitionUtils::partition_indices_parallel(
             num_threads, pool, radix_bits, morsel_size
         );
         auto end_bucketing = std::chrono::high_resolution_clock::now();
-        std::cout << "Radix bucketing wall time: "
-                  << std::chrono::duration_cast<std::chrono::microseconds>(end_bucketing - start_bucketing).count()
-                  << " ms" << std::endl;
+        // std::cout << "Radix bucketing wall time: "
+        //           << std::chrono::duration_cast<std::chrono::microseconds>(end_bucketing - start_bucketing).count()
+        //           << " ms" << std::endl;
 
         auto start_grouping = std::chrono::high_resolution_clock::now();
         auto by_key = radix_buckets_to_partitions_morsel(dataset, s.col_idx, buckets, 8, pool);
         auto end_grouping = std::chrono::high_resolution_clock::now();
-        std::cout << "Radix grouping wall time: "
-                  << std::chrono::duration_cast<std::chrono::microseconds>(end_grouping - start_grouping).count()
-                  << " ms" << std::endl;
+        // std::cout << "Radix grouping wall time: "
+        //           << std::chrono::duration_cast<std::chrono::microseconds>(end_grouping - start_grouping).count()
+        //           << " ms" << std::endl;
         return by_key;
     } else {
         return partition_dataset_index_morsel(dataset, schema, partition_columns, pool, num_threads, morsel_size);

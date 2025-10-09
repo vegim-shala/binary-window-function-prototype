@@ -3,7 +3,6 @@
 #include <sstream>
 #include <iostream>
 #include <operators/binary_window_function_operator.h>
-#include <operators/binary_window_function_operator2.h>
 #include <chrono>
 
 using namespace std;
@@ -15,8 +14,8 @@ int main() {
 
     auto start_reading = std::chrono::high_resolution_clock::now();
 
-    auto [input, input_schema] = read_csv_fast_parallel("Z3/input1.csv", num_threads);
-    auto [probe, probe_schema] = read_csv_fast_parallel("Z3/probe1.csv", num_threads);
+    auto [input, input_schema] = read_csv_fast_parallel("Z6/input3.csv", num_threads);
+    auto [probe, probe_schema] = read_csv_fast_parallel("Z6/probe3.csv", num_threads);
     // verify_binary_file("dynamic_columns.bin");
     // auto [data, schema] = read_binary("sensor.bin");
 
@@ -58,7 +57,7 @@ int main() {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     std::cout << "Execution Time: " << duration.count() << " milliseconds\n";
 
-    print_dataset(result, new_schema, 100);
+    // print_dataset(result, new_schema, 100);
 
     cout << "Output: " << endl;
     write_csv("official_duckdb_test/output.csv", result, new_schema);

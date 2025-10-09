@@ -183,13 +183,7 @@ void SortUtils::sort_dataset(Dataset &data, const FileSchema &schema, const size
 
 
 void SortUtils::sort_dataset_indices(const Dataset &data, std::vector<size_t> &indices, const size_t &order_idx) {
-    auto start = std::chrono::high_resolution_clock::now();
 
-    // auto proj = [&](size_t idx) {
-    //     return static_cast<uint32_t>(data[idx][order_idx]) ^ (1UL << 31);
-    // };
-    //
-    // ips2ra::sort(indices.begin(), indices.end(), proj);
 
     // std::cout << "DEBUG: Starting parallel sort. indices.size() = " << indices.size()
     //         << ", data.size() = " << data.size() << std::endl;
@@ -216,10 +210,15 @@ void SortUtils::sort_dataset_indices(const Dataset &data, std::vector<size_t> &i
         uint32_t key = static_cast<uint32_t>(data[row_id][order_idx]) ^ (1UL << 31);
         pairs.emplace_back(key, row_id);
     }
+    auto start = std::chrono::high_resolution_clock::now();
 
     // Sort by key only
     ips2ra::sort(pairs.begin(), pairs.end(),
                  [](const auto &p) { return p.first; });
+
+    // auto end = std::chrono::high_resolution_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    // std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
 
     // Write back sorted row_ids
     for (size_t i = 0; i < indices.size(); ++i) {
@@ -236,11 +235,68 @@ void SortUtils::sort_dataset_indices(const Dataset &data, std::vector<size_t> &i
 #endif
 
     //
+
+}
+
+
+void SortUtils::sort_dataset_indices_parallel(const Dataset &data, std::vector<size_t> &indices, const size_t &order_idx, ThreadPool &pool) {
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // std::cout << "DEBUG: Starting parallel sort. indices.size() = " << indices.size()
+    //         << ", data.size() = " << data.size() << std::endl;
+    //
+    // std::vector<uint32_t> order_keys(data.size());
+    // for (size_t i = 0; i < data.size(); ++i) {
+    //     order_keys[i] = static_cast<uint32_t>(data[i][order_idx]) ^ (1UL << 31);
+    // }
+    //
+    // // std::cout << "DEBUG: Keys computed successfully" << std::endl;
+    //
+    // ips2ra::sort(indices.begin(), indices.end(),
+    //          [&](size_t row_id) { return order_keys[row_id]; });
+    //
+    // // std::cout << "DEBUG: Sort completed successfully" << std::endl;
+    //
+
+#ifdef NDEBUG
+    // ---------- FAST PATH (Release build) ----------
+
+    std::vector<std::pair<uint32_t, size_t>> pairs;
+    pairs.reserve(indices.size());
+
+    for (size_t row_id : indices) {
+        uint32_t key = static_cast<uint32_t>(data[row_id][order_idx]) ^ (1UL << 31);
+        pairs.emplace_back(key, row_id);
+    }
+
+    ips2ra::parallel::sort(pairs.begin(), pairs.end(),
+                 [](const auto &p) { return p.first; }, pool.size());
+
+    // Write back sorted row_ids
+    for (size_t i = 0; i < indices.size(); ++i) {
+        indices[i] = pairs[i].second;
+    }
+
+    // auto proj = [&](size_t idx) {
+    //     return static_cast<uint32_t>(keys[idx]) ^ (1UL << 31);
+    // };
+    //
+    // ips2ra::parallel::sort(indices.begin(), indices.end(), proj, pool.size());
+
+#else
+    std::sort(indices.begin(), indices.end(),
+              [&](size_t lhs, size_t rhs) {
+                  uint32_t key_lhs = static_cast<uint32_t>(data[lhs][order_idx]) ^ (1UL << 31);
+                  uint32_t key_rhs = static_cast<uint32_t>(data[rhs][order_idx]) ^ (1UL << 31);
+                  return key_lhs < key_rhs;
+              });
+#endif
+
+    //
     // auto end = std::chrono::high_resolution_clock::now();
     // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     // std::cout << "Time taken for SORTING: " << duration.count() << " ms" << std::endl;
 }
-
 
 #include <boost/sort/spreadsort/spreadsort.hpp>
 #include <boost/sort/spreadsort/integer_sort.hpp>

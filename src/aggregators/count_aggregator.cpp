@@ -12,3 +12,19 @@ void CountAggregator::build_from_values(const std::vector<int32_t> &values) {
 int64_t CountAggregator::query(size_t lo, size_t hi) const {
     return prefix[hi] - prefix[lo];
 }
+
+void CountAggregator::build_from_values_segtree(const std::vector<int32_t> &values) {
+    return;
+}
+
+int64_t CountAggregator::seg_query(size_t lo, size_t hi) const {
+    return 1;
+}
+
+void CountAggregator::build_from_values_sqrt_tree(const std::vector<int32_t> &vals) {
+    return;
+}
+
+int64_t CountAggregator::sqrt_query(size_t lo, size_t hi) const {
+    return 1;
+}

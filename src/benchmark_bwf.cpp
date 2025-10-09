@@ -14,7 +14,6 @@ using namespace std;
 #include <string>
 #include <filesystem>
 #include <operators/binary_window_function_operator.h>
-#include <operators/binary_window_function_operator2.h>
 
 namespace fs = std::filesystem;
 
@@ -23,25 +22,40 @@ public:
     void run_benchmarks(int algo_ind) {
         std::cout << "=== Binary Window Function Benchmark Suite ===\n\n";
 
-        // Test different scenarios
-        // test_few_large_partitions(algo_ind); // A1
-        // test_many_small_partitions(algo_ind); // A2
-        // test_equal_partitions_and_rows(algo_ind); // A3
-        // test_less_partitions_in_probe(algo_ind); // B1
-        // test_less_partitions_in_input(algo_ind); // B2
-        // test_one_row_probe(algo_ind); // C1
-        // test_A1_bigger_ranges(algo_ind); // D1
-        // test_A1_very_small_ranges(algo_ind); // D2
-        // test_multiple_partitioning_columns(algo_ind); // E1
-        // test_huge_single_partition(algo_ind); // E1
-        test_one_partition_scaling(algo_ind); // Z1
-        // test_one_partition_one_range(algo_ind); // Z2
-        // test_many_partitions_scaling(algo_ind); // Z3
-        // test_one_partition_scaling_one_probe_row(algo_ind); // Z1.1
-        // test_probing_scaling(algo_ind); // Z4
-        // test_one_partition_scaling_seq(algo_ind); // Z1 seq
-        // test_many_partitions_scaling_seq(algo_ind); // Z3 seq
+        int number_of_runs = 6;
 
+        for (int i = 0; i < number_of_runs; i++) {
+            std::cout << "RUN NUMBER: " << i << std::endl;
+
+
+            // Test different scenarios
+            // test_few_large_partitions(algo_ind); // A1
+            // test_many_small_partitions(algo_ind); // A2
+            // test_equal_partitions_and_rows(algo_ind); // A3
+            // test_less_partitions_in_probe(algo_ind); // B1
+            // test_less_partitions_in_input(algo_ind); // B2
+            // test_one_row_probe(algo_ind); // C1
+            // test_A1_bigger_ranges(algo_ind); // D1
+            // test_A1_very_small_ranges(algo_ind); // D2
+            // test_multiple_partitioning_columns(algo_ind); // E1
+            // test_huge_single_partition(algo_ind); // E1
+            // test_one_partition_scaling(algo_ind); // Z1
+            // test_one_partition_one_range(algo_ind); // Z2
+            // test_many_partitions_scaling(algo_ind); // Z3
+            // test_one_partition_scaling_one_probe_row(algo_ind); // Z1.1
+            // test_probing_scaling(algo_ind); // Z4
+            // test_one_partition_scaling_seq(algo_ind); // Z1 seq
+            // test_many_partitions_scaling_seq(algo_ind); // Z3 seq
+            // test_increase_number_of_partitions(algo_ind); // Z5
+            // benchmark_time_per_component_Z1(algo_ind);
+            // benchmark_time_per_component_Z3(algo_ind);
+            // benchmark_Z6(algo_ind);
+            // benchmark_Z7(algo_ind);
+            // benchmark_Z8(algo_ind);
+            // benchmark_Z9(algo_ind);
+            // benchmark_Z10(algo_ind);
+            benchmark_Z11(algo_ind);
+        }
         std::cout << "\n=== Benchmark Complete ===\n";
     }
 
@@ -58,26 +72,6 @@ private:
 
         // RANGE frame based on begin_col / end_col in the probe
         model.join_spec = JoinSpec{
-            .begin_column = "begin_col",
-            .end_column = "end_col"
-        };
-
-        model.agg_type = AggregationType::SUM;
-        return model;
-    }
-
-    BinaryWindowFunctionModel2 create_test_model2(int num_partition_cols) {
-        BinaryWindowFunctionModel2 model;
-        model.value_column = "value";
-        model.partition_columns = {"category"};
-        if (num_partition_cols > 1) {
-            model.partition_columns = {"category1", "category2"};
-        }
-        model.order_column = "timestamp";
-        model.output_column = "sum_result";
-
-        // RANGE frame based on begin_col / end_col in the probe
-        model.join_spec = JoinSpec2{
             .begin_column = "begin_col",
             .end_column = "end_col"
         };
@@ -106,11 +100,6 @@ private:
             if (algo_ind == 1) {
                 BinaryWindowFunctionModel model = create_test_model(1);
                 BinaryWindowFunctionOperator op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
@@ -142,11 +131,6 @@ private:
                 BinaryWindowFunctionOperator op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
 
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
@@ -174,11 +158,6 @@ private:
             if (algo_ind == 1) {
                 BinaryWindowFunctionModel model = create_test_model(1);
                 BinaryWindowFunctionOperator op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
@@ -210,11 +189,6 @@ private:
                 BinaryWindowFunctionOperator op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
 
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
@@ -242,11 +216,6 @@ private:
             if (algo_ind == 1) {
                 BinaryWindowFunctionModel model = create_test_model(1);
                 BinaryWindowFunctionOperator op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
@@ -278,11 +247,6 @@ private:
                 BinaryWindowFunctionOperator op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
 
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
@@ -310,11 +274,6 @@ private:
             if (algo_ind == 1) {
                 BinaryWindowFunctionModel model = create_test_model(1);
                 BinaryWindowFunctionOperator op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
@@ -346,11 +305,6 @@ private:
                 BinaryWindowFunctionOperator op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
 
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
@@ -378,11 +332,6 @@ private:
             if (algo_ind == 1) {
                 BinaryWindowFunctionModel model = create_test_model(2);
                 BinaryWindowFunctionOperator op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(2);
-                BinaryWindowFunctionOperator2 op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
@@ -423,33 +372,33 @@ private:
         std::cout << "Z1. Scenario: Testing for arbitrary ranges, one partition of different number of values)\n";
 
         std::vector<std::pair<std::string, std::string> > files = {
-            // {"Z1/input1.csv", "Z1/probe1.csv"},
-            // {"Z1/input2.csv", "Z1/probe2.csv"},
-            // {"Z1/input3.csv", "Z1/probe3.csv"},
+            {"Z1/input1.csv", "Z1/probe1.csv"},
+            {"Z1/input2.csv", "Z1/probe2.csv"},
+            {"Z1/input3.csv", "Z1/probe3.csv"},
             {"Z1/input4.csv", "Z1/probe4.csv"},
             {"Z1/input5.csv", "Z1/probe5.csv"},
             {"Z1/input6.csv", "Z1/probe6.csv"},
-            {"Z1/input7.csv", "Z1/probe7.csv"},
-            {"Z1/input8.csv", "Z1/probe8.csv"},
-            {"Z1/input11.csv", "Z1/probe11.csv"},
-            {"Z1/input9.csv", "Z1/probe9.csv"},
-            {"Z1/input15.csv", "Z1/probe15.csv"},
-            {"Z1/input19.csv", "Z1/probe19.csv"},
-            {"Z1/input12.csv", "Z1/probe12.csv"},
-            {"Z1/input20.csv", "Z1/probe20.csv"},
-            {"Z1/input21.csv", "Z1/probe21.csv"},
-            {"Z1/input10.csv", "Z1/probe10.csv"},
-            {"Z1/input13.csv", "Z1/probe13.csv"},
-            {"Z1/input22.csv", "Z1/probe22.csv"},
-            {"Z1/input14.csv", "Z1/probe14.csv"},
-            {"Z1/input23.csv", "Z1/probe23.csv"},
-            {"Z1/input24.csv", "Z1/probe24.csv"},
-            {"Z1/input25.csv", "Z1/probe25.csv"},
-            {"Z1/input17.csv", "Z1/probe17.csv"}
+            // {"Z1/input7.csv", "Z1/probe7.csv"},
+            // {"Z1/input8.csv", "Z1/probe8.csv"},
+            // {"Z1/input11.csv", "Z1/probe11.csv"},
+            // {"Z1/input9.csv", "Z1/probe9.csv"},
+            // {"Z1/input15.csv", "Z1/probe15.csv"},
+            // {"Z1/input19.csv", "Z1/probe19.csv"},
+            // {"Z1/input12.csv", "Z1/probe12.csv"},
+            // {"Z1/input20.csv", "Z1/probe20.csv"},
+            // {"Z1/input21.csv", "Z1/probe21.csv"},
+            // {"Z1/input10.csv", "Z1/probe10.csv"},
+            // {"Z1/input13.csv", "Z1/probe13.csv"},
+            // {"Z1/input22.csv", "Z1/probe22.csv"},
+            // {"Z1/input14.csv", "Z1/probe14.csv"},
+            // {"Z1/input23.csv", "Z1/probe23.csv"},
+            // {"Z1/input24.csv", "Z1/probe24.csv"},
+            // {"Z1/input25.csv", "Z1/probe25.csv"},
+            // {"Z1/input17.csv", "Z1/probe17.csv"}
             // {"Z1/input18.csv", "Z1/probe18.csv"}
         };
         int num_threads = std::thread::hardware_concurrency();
-        
+
         for (int i = 0; i < files.size(); i++) {
             auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
             auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
@@ -459,11 +408,6 @@ private:
             if (algo_ind == 1) {
                 BinaryWindowFunctionModel model = create_test_model(1);
                 BinaryWindowFunctionOperator op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
@@ -505,11 +449,6 @@ private:
                 BinaryWindowFunctionOperator op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
 
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
@@ -522,9 +461,9 @@ private:
         std::cout << "Z3. Scenario: Testing for arbitrary ranges, many partitions of different number of values)\n";
 
         std::vector<std::pair<std::string, std::string> > files = {
-            {"Z3/input1.csv", "Z3/probe1.csv"},
-            {"Z3/input2.csv", "Z3/probe2.csv"},
-            {"Z3/input3.csv", "Z3/probe3.csv"},
+            // {"Z3/input1.csv", "Z3/probe1.csv"},
+            // {"Z3/input2.csv", "Z3/probe2.csv"},
+            // {"Z3/input3.csv", "Z3/probe3.csv"},
             {"Z3/input4.csv", "Z3/probe4.csv"},
             {"Z3/input5.csv", "Z3/probe5.csv"},
             {"Z3/input6.csv", "Z3/probe6.csv"},
@@ -532,10 +471,13 @@ private:
             {"Z3/input8.csv", "Z3/probe8.csv"},
             {"Z3/input11.csv", "Z3/probe11.csv"},
             {"Z3/input9.csv", "Z3/probe9.csv"},
-            {"Z3/input12.csv", "Z3/probe12.csv"},
+            // {"Z3/input12.csv", "Z3/probe12.csv"},
+            {"Z3/input20.csv", "Z3/probe20.csv"},
             {"Z3/input10.csv", "Z3/probe10.csv"},
             {"Z3/input13.csv", "Z3/probe13.csv"},
-            {"Z3/input14.csv", "Z3/probe14.csv"}
+            {"Z3/input14.csv", "Z3/probe14.csv"},
+            {"Z3/input23.csv", "Z3/probe23.csv"},
+            {"Z3/input25.csv", "Z3/probe25.csv"}
         };
         int num_threads = std::thread::hardware_concurrency();
         for (int i = 0; i < files.size(); i++) {
@@ -547,11 +489,6 @@ private:
             if (algo_ind == 1) {
                 BinaryWindowFunctionModel model = create_test_model(1);
                 BinaryWindowFunctionOperator op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
@@ -587,11 +524,6 @@ private:
             if (algo_ind == 1) {
                 BinaryWindowFunctionModel model = create_test_model(1);
                 BinaryWindowFunctionOperator op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
@@ -637,13 +569,7 @@ private:
                 BinaryWindowFunctionOperator op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
-
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
@@ -693,11 +619,6 @@ private:
                 BinaryWindowFunctionOperator op(model);
 
                 auto [result, new_schema] = op.execute_sequential(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
-
-                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
 
             // std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
@@ -737,14 +658,284 @@ private:
                 BinaryWindowFunctionOperator op(model);
 
                 auto [result, new_schema] = op.execute_sequential(input, probe, input_schema, probe_schema);
-            } else if (algo_ind == 2) {
-                BinaryWindowFunctionModel2 model = create_test_model2(1);
-                BinaryWindowFunctionOperator2 op(model);
+            }
+
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+
+    void test_increase_number_of_partitions(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z5. Scenario: Increase number of partitions, keep the same rows per partition)\n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            {"Z5/input1.csv", "Z5/probe1.csv"},
+            {"Z5/input2.csv", "Z5/probe2.csv"},
+            {"Z5/input3.csv", "Z5/probe3.csv"},
+            {"Z5/input4.csv", "Z5/probe4.csv"},
+            {"Z5/input5.csv", "Z5/probe5.csv"},
+            {"Z5/input6.csv", "Z5/probe6.csv"},
+            {"Z5/input7.csv", "Z5/probe7.csv"},
+            {"Z5/input8.csv", "Z5/probe8.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+        for (int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
 
                 auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
             }
 
             std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+
+    void benchmark_time_per_component_Z1(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z1. Scenario: Testing for arbitrary ranges, one partition of different number of values)\n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            {"Z1/input4.csv", "Z1/probe4.csv"},
+            {"Z1/input6.csv", "Z1/probe6.csv"},
+            {"Z1/input7.csv", "Z1/probe7.csv"},
+            {"Z1/input9.csv", "Z1/probe9.csv"},
+            {"Z1/input10.csv", "Z1/probe10.csv"},
+            {"Z1/input23.csv", "Z1/probe23.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+
+        for (int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
+            // std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void benchmark_time_per_component_Z3(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z3. Scenario: Testing for arbitrary ranges, one partition of different number of values)\n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            {"Z3/input4.csv", "Z3/probe4.csv"},
+            {"Z3/input6.csv", "Z3/probe6.csv"},
+            {"Z3/input7.csv", "Z3/probe7.csv"},
+            {"Z3/input9.csv", "Z3/probe9.csv"},
+            {"Z3/input10.csv", "Z3/probe10.csv"},
+            {"Z3/input23.csv", "Z3/probe23.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+
+        for (int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
+            // std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void benchmark_Z6(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z6. Scenario: One Partition - small ranges\n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            {"Z6/input1.csv", "Z6/probe1.csv"},
+            {"Z6/input2.csv", "Z6/probe2.csv"},
+            {"Z6/input3.csv", "Z6/probe3.csv"},
+            {"Z6/input4.csv", "Z6/probe4.csv"},
+            {"Z6/input5.csv", "Z6/probe5.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+        for (int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void benchmark_Z7(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z7. Scenario: Few Partitions - small ranges\n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            {"Z7/input1.csv", "Z7/probe1.csv"},
+            {"Z7/input2.csv", "Z7/probe2.csv"},
+            {"Z7/input3.csv", "Z7/probe3.csv"},
+            {"Z7/input4.csv", "Z7/probe4.csv"},
+            {"Z7/input5.csv", "Z7/probe5.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+        for (int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void benchmark_Z8(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z8. Scenario: Many Partitions \n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            {"Z8/input1.csv", "Z8/probe1.csv"},
+            {"Z8/input2.csv", "Z8/probe2.csv"},
+            {"Z8/input3.csv", "Z8/probe3.csv"},
+            {"Z8/input4.csv", "Z8/probe4.csv"},
+            {"Z8/input5.csv", "Z8/probe5.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+        for (int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void benchmark_Z9(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z9. Scenario: Many Partitions \n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            {"Z9/input1.csv", "Z9/probe1.csv"},
+            {"Z9/input2.csv", "Z9/probe2.csv"},
+            {"Z9/input3.csv", "Z9/probe3.csv"},
+            {"Z9/input4.csv", "Z9/probe4.csv"},
+            {"Z9/input5.csv", "Z9/probe5.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+        for (int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void benchmark_Z10(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z10. Scenario: Many Partitions \n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            {"Z10/input1.csv", "Z10/probe1.csv"},
+            {"Z10/input2.csv", "Z10/probe2.csv"},
+            {"Z10/input3.csv", "Z10/probe3.csv"},
+            {"Z10/input4.csv", "Z10/probe4.csv"},
+            {"Z10/input5.csv", "Z10/probe5.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+        for (int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
+        }
+        std::cout << "---------------------------------------------------------------------------------\n";
+    }
+
+    void benchmark_Z11(int algo_ind) {
+        std::cout << "---------------------------------------------------------------------------------\n";
+        std::cout << "Z11. Scenario: Skews \n";
+
+        std::vector<std::pair<std::string, std::string> > files = {
+            {"Z9/input1.csv", "Z9/probe1.csv"},
+            {"Z9/input2.csv", "Z9/probe2.csv"},
+            {"Z9/input3.csv", "Z9/probe3.csv"}
+        };
+        int num_threads = std::thread::hardware_concurrency();
+        for (int i = 0; i < files.size(); i++) {
+            auto [input, input_schema] = read_csv_fast_parallel(files[i].first, num_threads);
+            auto [probe, probe_schema] = read_csv_fast_parallel(files[i].second, num_threads);
+
+            std::cout << "Processing " << files[i].first << " and " << files[i].second << "\n\n";
+
+            if (algo_ind == 1) {
+                BinaryWindowFunctionModel model = create_test_model(1);
+                BinaryWindowFunctionOperator op(model);
+
+                auto [result, new_schema] = op.execute(input, probe, input_schema, probe_schema);
+            }
+
+            std::cout << "DONE WITH " << files[i].first << " and " << files[i].second << "\n\n";
         }
         std::cout << "---------------------------------------------------------------------------------\n";
     }

@@ -28,19 +28,19 @@ public:
     }
 
     inline void build_keys_and_values(
-    const Dataset &input,
-    const FileSchema &schema,
-    const std::vector<size_t> &sorted_indices,
-    size_t order_idx,
-    size_t value_idx,
-    std::vector<int32_t> &out_values
-) {
+        const Dataset &input,
+        const FileSchema &schema,
+        const std::vector<size_t> &sorted_indices,
+        size_t order_idx,
+        size_t value_idx,
+        std::vector<int32_t> &out_values
+    ) {
         keys.clear();
         keys.reserve(sorted_indices.size());
         out_values.clear();
         out_values.reserve(sorted_indices.size());
 
-        for (size_t pos : sorted_indices) {
+        for (size_t pos: sorted_indices) {
             const auto &row = input[pos];
             keys.push_back(row[order_idx]);
             out_values.push_back(row[value_idx]);
@@ -426,7 +426,7 @@ public:
 
     size_t keys_size() const { return keys.size(); }
 
-     // Interleaved batched upper_bound on [lo[i], n) for each query q[i] (int32_t).
+    // Interleaved batched upper_bound on [lo[i], n) for each query q[i] (int32_t).
     // Returns hi[i] = first index j >= lo[i] with keys[j] > q[i] (or n if none).
     inline std::vector<size_t> batched_upper_bound_i32_interleaved_from_lo(
         const std::vector<int32_t> &q,
@@ -569,6 +569,11 @@ public:
         res += sqrt_prefix[r - 1]; // prefix of right block
         return res;
     }
+
+    const std::vector<int32_t> &get_keys() const { return keys; }
+    const std::vector<int64_t> &get_prefix() const { return prefix; }
+    size_t key_count() const { return keys.size(); }
+    bool has_keys() const { return !keys.empty(); }
 
 private:
     JoinSpec join_spec;
