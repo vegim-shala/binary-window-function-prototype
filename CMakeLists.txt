@@ -6,6 +6,11 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)  # Use Release for better performance
 endif()
 
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_compile_definitions(NDEBUG)
+    add_compile_options(-O3 -march=native)
+endif()
+
 # Common compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")

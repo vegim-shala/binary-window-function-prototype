@@ -37,7 +37,7 @@ public:
             // test_one_row_probe(algo_ind); // C1
             // test_A1_bigger_ranges(algo_ind); // D1
             // test_A1_very_small_ranges(algo_ind); // D2
-            // test_multiple_partitioning_columns(algo_ind); // E1
+            test_multiple_partitioning_columns(algo_ind); // E1
             // test_huge_single_partition(algo_ind); // E1
             // test_one_partition_scaling(algo_ind); // Z1
             // test_one_partition_one_range(algo_ind); // Z2
@@ -54,7 +54,7 @@ public:
             // benchmark_Z8(algo_ind);
             // benchmark_Z9(algo_ind);
             // benchmark_Z10(algo_ind);
-            benchmark_Z11(algo_ind);
+            // benchmark_Z11(algo_ind);
         }
         std::cout << "\n=== Benchmark Complete ===\n";
     }

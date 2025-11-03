@@ -47,4 +47,38 @@ private:
     // size_t num_blocks = 0;
 
 
+    struct SqrtTree {
+        using Item = int64_t;
+
+        int n = 0;
+        int lg = 0;
+        int index_sz = 0;
+
+        std::vector<Item> v;
+        std::vector<int> clz;
+        std::vector<int> layers;
+        std::vector<int> on_layer;
+        std::vector<std::vector<Item>> pref, suf, between;
+
+        void build(const std::vector<int32_t> &a);
+        Item query(int l, int r) const;
+
+    private:
+        static Item op(Item a, Item b) { return a + b; }
+
+        inline int log2up(int n) const {
+            int res = 0;
+            while ((1 << res) < n) res++;
+            return res;
+        }
+
+        void build_block(int layer, int l, int r);
+        void build_between(int layer, int lBound, int rBound, int betweenOffs);
+        void build_between_zero();
+        void build(int layer, int lBound, int rBound, int betweenOffs);
+        Item query(int l, int r, int betweenOffs, int base) const;
+    };
+
+    SqrtTree sqrt_tree;
+
 };

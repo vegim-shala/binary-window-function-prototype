@@ -8,6 +8,7 @@
 #include "operators/utils/partition_utils.h"
 #include "operators/utils/sort_utils.h"
 #include "operators/utils/thread_pool.h"
+#include "operators/utils/timing_utils.h"
 #include <mutex>
 #include <future>
 #include <numeric>
@@ -179,7 +180,7 @@ std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel_sort_pro
     for (size_t i = 0; i < tasks.size(); i++) {
         uint64_t sum = 0;
         if (lo_positions[i] < hi_positions[i]) {
-            sum = local_join.prefix_sums_query(lo_positions[i], hi_positions[i]);
+            sum = local_join.seg_query(lo_positions[i], hi_positions[i]);
         }
         agg[tasks[i].orig_pos] = sum; // scatter back
     }
@@ -654,17 +655,17 @@ void BinaryWindowFunctionOperator::process_partition_new(
     auto start_building_index = std::chrono::high_resolution_clock::now();
 
     auto aggregator = create_aggregator(spec.agg_type);
-    aggregator->build_from_values(values);
+    aggregator->build_from_values_sqrt_tree(values);
     // local_join.build_prefix_sums_from_sorted_indices(input, input_schema,
     //                                                  in_indices, order_idx, value_idx);
     // local_join.build_index_from_vectors_segtree(keys, values);
     // local_join.build_index_from_vectors_sqrttree(keys, values);
     // local_join.build_eytzinger();
 
-    auto end_building_index = std::chrono::high_resolution_clock::now();
-    auto duration_building_index = std::chrono::duration_cast<std::chrono::microseconds>(
-        end_building_index - start_building_index);
-    std::cout << "Time taken for BUILDING INDEX: " << duration_building_index.count() << " ms" << std::endl;
+    // auto end_building_index = std::chrono::high_resolution_clock::now();
+    // auto duration_building_index = std::chrono::duration_cast<std::chrono::microseconds>(
+    //     end_building_index - start_building_index);
+    // std::cout << "Time taken for BUILDING INDEX: " << duration_building_index.count() << " ms" << std::endl;
 
     // --------------------------- PROCESSING THE PROBE ------------------------------
 
@@ -686,10 +687,10 @@ void BinaryWindowFunctionOperator::process_partition_new(
                                            end_col_idx);
     }
 
-    auto end_partition_processing = std::chrono::high_resolution_clock::now();
-    auto duration_partition_processing = std::chrono::duration_cast<std::chrono::microseconds>(
-        end_partition_processing - start_partition_processing);
-    std::cout << "Time taken for PROBING: " << duration_partition_processing.count() << " ms" << std::endl;
+    // auto end_partition_processing = std::chrono::high_resolution_clock::now();
+    // auto duration_partition_processing = std::chrono::duration_cast<std::chrono::microseconds>(
+    //     end_partition_processing - start_partition_processing);
+    // std::cout << "Time taken for PROBING: " << duration_partition_processing.count() << " ms" << std::endl;
 }
 
 void BinaryWindowFunctionOperator::process_probe_partition_parallel_new(
@@ -732,6 +733,11 @@ void BinaryWindowFunctionOperator::process_probe_partition_parallel_new(
             std::move(part_res.begin(), part_res.end(), std::back_inserter(result));
         }
     }
+
+    QueryTimer::flush();
+    // std::cout << "Total sqrt_query time: "
+    //           << QueryTimer::total_ns() / 1e6 << " ms\n";
+    QueryTimer::reset();
 }
 
 
@@ -831,10 +837,14 @@ std::vector<DataRow> BinaryWindowFunctionOperator::process_probe_morsel_new(
     out.reserve(cnt);
     for (size_t i = 0; i < cnt; ++i) {
         if (lo[i] >= hi[i]) continue;
-        const int64_t sum = aggregator.query(lo[i], hi[i]);
-        DataRow r = probe[probe_ids[i]];
-        r.push_back(sum);
-        out.emplace_back(std::move(r));
+        {
+            ScopedQueryTimer t;   // starts timing here
+            const int64_t sum = aggregator.sqrt_query(lo[i], hi[i]);
+            DataRow r = probe[probe_ids[i]];
+            r.push_back(sum);
+            out.emplace_back(std::move(r));
+        }
+
     }
     return out;
 }
